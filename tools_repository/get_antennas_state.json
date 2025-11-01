@@ -6,8 +6,8 @@
     "optional": []
   },
   "execution": {
-    "type": "inline",
-    "code": "full_state = await make_request('GET', '/api/state/full')\nif 'antennas_position' in full_state:\n    return {'antennas_position': full_state['antennas_position']}\nreturn full_state"
+    "type": "script",
+    "script_file": "get_antennas_state.py"
   }
 }
 

@@ -43,7 +43,7 @@ Each tool has its own JSON file defining:
 - **Name**: Tool identifier
 - **Description**: What the tool does
 - **Parameters**: Required and optional parameters
-- **Execution**: Inline code or script file
+- **Execution**: Script file for implementation
 
 Example (`get_robot_state.json`):
 
@@ -56,73 +56,22 @@ Example (`get_robot_state.json`):
     "optional": []
   },
   "execution": {
-    "type": "inline",
-    "code": "return await make_request('GET', '/api/state/full')"
+    "type": "script",
+    "script_file": "get_robot_state.py"
   }
 }
 ```
 
-### 3. Execution Types
+### 3. Execution Type
 
-#### Inline Code
-Simple operations defined directly in JSON:
-- Best for single API calls
-- Can use helper functions: `make_request()`, `create_head_pose()`
-- Access parameters via `params` dict
-
-#### Script Files
-Complex operations in separate Python files:
-- Best for multi-step operations
+All tools use script files for execution:
+- All operations are in separate Python files
 - Define an `async def execute(make_request, create_head_pose, params)` function
 - Located in `scripts/` directory
 
 ## Adding a New Tool
 
-### Method 1: Simple Inline Tool
-
-1. Create a new JSON file (e.g., `my_tool.json`):
-
-```json
-{
-  "name": "my_tool",
-  "description": "Description of what my tool does",
-  "parameters": {
-    "required": [
-      {
-        "name": "param1",
-        "type": "string",
-        "description": "First parameter"
-      }
-    ],
-    "optional": [
-      {
-        "name": "param2",
-        "type": "number",
-        "default": 1.0,
-        "description": "Second parameter"
-      }
-    ]
-  },
-  "execution": {
-    "type": "inline",
-    "code": "return await make_request('POST', '/api/endpoint', json_data={'key': params.get('param1')})"
-  }
-}
-```
-
-2. Add to `tools_index.json`:
-
-```json
-{
-  "name": "my_tool",
-  "enabled": true,
-  "definition_file": "my_tool.json"
-}
-```
-
-3. Restart the server - your tool is now available!
-
-### Method 2: Complex Script-Based Tool
+### Creating a Script-Based Tool
 
 1. Create a script file in `scripts/` (e.g., `scripts/my_complex_tool.py`):
 
@@ -182,8 +131,8 @@ To modify a tool's behavior:
 2. Edit the JSON file:
    - Update description
    - Add/remove/modify parameters
-   - Change inline code or script reference
-3. If using a script, edit the Python file in `scripts/`
+   - Change script reference
+3. Edit the Python file in `scripts/`
 4. Restart the server
 
 ## Disabling Tools
@@ -212,7 +161,7 @@ This verifies:
 
 ## Available Helper Functions
 
-When writing inline code or scripts, you have access to:
+When writing scripts, you have access to:
 
 ### `make_request(method, endpoint, json_data=None, params=None)`
 Make HTTP requests to the Reachy daemon:
@@ -245,8 +194,7 @@ pose = create_head_pose(z=10, pitch=-15, degrees=True, mm=True)
 
 The original `server.py` had 18 hardcoded tools with `@mcp.tool()` decorators. These have all been migrated to the repository:
 
-- ✅ 14 simple tools → inline code
-- ✅ 4 complex tools → script files
+- ✅ 18 tools → script files
 - ✅ All functionality preserved
 - ✅ Easier to extend and customize
 

@@ -57,8 +57,8 @@ async def move_head(x: float = 0.0, y: float = 0.0, ...):
     "optional": []
   },
   "execution": {
-    "type": "inline",
-    "code": "return await make_request('GET', '/api/state/full')"
+    "type": "script",
+    "script_file": "get_robot_state.py"
   }
 }
 ```
@@ -77,44 +77,26 @@ tools_repository/
 ├── tools_index.json              # Root file listing all tools
 ├── SCHEMA.md                     # Documentation of JSON schema
 ├── README.md                     # Comprehensive guide
-├── get_robot_state.json          # Simple inline tool
-├── move_head.json                # Inline tool with parameters
+├── get_robot_state.json          # Script-based tool
+├── move_head.json                # Script-based tool with parameters
 ├── express_emotion.json          # Script-based tool
 ├── ... (15 more tool definitions)
-└── scripts/                      # Python scripts for complex tools
+└── scripts/                      # Python scripts for all tools
+    ├── get_robot_state.py        # Simple state fetch
+    ├── move_head.py              # Head movement
     ├── nod_head.py               # Multi-step nod gesture
     ├── shake_head.py             # Multi-step shake gesture
     ├── express_emotion.py        # Complex emotion logic
-    └── perform_gesture.py        # Complex gesture sequences
+    ├── perform_gesture.py        # Complex gesture sequences
+    └── ... (12 more script files)
 ```
 
 ## Tool Types
 
-### 1. Inline Tools (14 tools)
-
-Simple operations defined directly in JSON:
-- `get_robot_state` - Fetch robot state
-- `get_head_state` - Fetch head state
-- `get_antennas_state` - Fetch antenna state
-- `move_head` - Move head with parameters
-- `tilt_head` - Tilt head left/right
-- `move_antennas` - Move both antennas
-- `reset_head` - Reset to neutral
-- `reset_antennas` - Reset to neutral
-- `look_at_direction` - Look in a direction
-- `turn_on_robot` - Power on
-- `turn_off_robot` - Power off
-- `get_power_state` - Check power state
-- `stop_all_movements` - Emergency stop
-- `get_health_status` - System health
-
-### 2. Script-Based Tools (4 tools)
-
-Complex operations in separate Python files:
-- `nod_head` - Multi-step nodding gesture
-- `shake_head` - Multi-step shaking gesture
-- `express_emotion` - Complex emotion expressions
-- `perform_gesture` - Complex gesture sequences
+All 18 tools use script-based execution:
+- Each tool has its own Python script in `scripts/` directory
+- Scripts define an `async def execute(make_request, create_head_pose, params)` function
+- Consistent architecture across all tools
 
 ## Server Changes
 
@@ -184,8 +166,8 @@ Repository path: /Users/ori.nachum/Git/reachy-mini-mcp/tools_repository
 
 ✓ Loaded tool index with 18 tools
 
-✓ Tool definition valid: get_robot_state (inline)
-✓ Tool definition valid: get_head_state (inline)
+✓ Tool definition valid: get_robot_state (script)
+✓ Tool definition valid: get_head_state (script)
 ... (16 more tools)
 
 ============================================================
@@ -270,9 +252,10 @@ async def execute(make_request, create_head_pose, params):
 
 - **18 tools** migrated from hardcoded to repository
 - **~500 lines** of tool code moved to repository
+- **18 script files** created for all tools
 - **0 tools** lost or broken
 - **100%** backward compatibility maintained
-- **Server code** reduced from 612 to 386 lines (37% reduction)
+- **Server code** simplified with inline functionality removed
 
 ## Backward Compatibility
 

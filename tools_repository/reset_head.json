@@ -6,8 +6,8 @@
     "optional": []
   },
   "execution": {
-    "type": "inline",
-    "code": "pose = create_head_pose()\npayload = {'head_pose': pose, 'duration': 2.0}\nreturn await make_request('POST', '/api/move/goto', json_data=payload)"
+    "type": "script",
+    "script_file": "reset_head.py"
   }
 }
 

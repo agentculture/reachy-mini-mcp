@@ -61,8 +61,8 @@
     ]
   },
   "execution": {
-    "type": "inline",
-    "code": "pose = create_head_pose(params.get('x', 0.0), params.get('y', 0.0), params.get('z', 0.0), params.get('roll', 0.0), params.get('pitch', 0.0), params.get('yaw', 0.0), params.get('degrees', True), params.get('mm', True))\npayload = {'head_pose': pose, 'duration': params.get('duration', 2.0)}\nreturn await make_request('POST', '/api/move/goto', json_data=payload)"
+    "type": "script",
+    "script_file": "move_head.py"
   }
 }
 

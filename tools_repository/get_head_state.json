@@ -6,8 +6,8 @@
     "optional": []
   },
   "execution": {
-    "type": "inline",
-    "code": "full_state = await make_request('GET', '/api/state/full')\nif 'head_pose' in full_state:\n    return {'head_pose': full_state['head_pose']}\nreturn full_state"
+    "type": "script",
+    "script_file": "get_head_state.py"
   }
 }
 

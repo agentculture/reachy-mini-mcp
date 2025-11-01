@@ -358,7 +358,7 @@ This MCP server uses a **repository-based approach** for defining tools, making 
 - ✅ Add new tools without modifying server code
 - ✅ Customize tool behavior by editing JSON files
 - ✅ Easy to version control and share tool definitions
-- ✅ Simple inline code or complex script-based execution
+- ✅ Script-based execution for complex operations
 
 **Repository Structure:**
 ```
@@ -374,9 +374,19 @@ tools_repository/
 
 ### Adding New Tools
 
-#### Method 1: Simple Inline Tool
+Create a Python script in `tools_repository/scripts/my_tool.py`:
 
-Create a JSON file (e.g., `tools_repository/my_tool.json`):
+```python
+async def execute(make_request, create_head_pose, params):
+    """Execute the tool."""
+    # Your logic here
+    await make_request("POST", "/api/endpoint1", json_data={...})
+    await asyncio.sleep(1.0)
+    await make_request("POST", "/api/endpoint2", json_data={...})
+    return {"status": "success"}
+```
+
+Then create a JSON file (e.g., `tools_repository/my_tool.json`):
 
 ```json
 {
@@ -391,8 +401,8 @@ Create a JSON file (e.g., `tools_repository/my_tool.json`):
     ]
   },
   "execution": {
-    "type": "inline",
-    "code": "return await make_request('POST', '/api/endpoint', json_data={'key': params.get('param1')})"
+    "type": "script",
+    "script_file": "my_tool.py"
   }
 }
 ```
@@ -407,24 +417,6 @@ Add to `tools_repository/tools_index.json`:
 ```
 
 Restart the server - your tool is now available!
-
-#### Method 2: Complex Script-Based Tool
-
-For multi-step operations, create a Python script in `tools_repository/scripts/my_tool.py`:
-
-```python
-async def execute(make_request, create_head_pose, params):
-    """Execute the tool."""
-    # Your complex logic here
-    await make_request("POST", "/api/endpoint1", json_data={...})
-    await asyncio.sleep(1.0)
-    await make_request("POST", "/api/endpoint2", json_data={...})
-    return {"status": "success"}
-```
-
-Then create the JSON definition with `"type": "script"` and `"script_file": "my_tool.py"`.
-
-See `tools_repository/README.md` for detailed documentation.
 
 ### Testing Tools
 

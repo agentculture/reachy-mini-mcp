@@ -19,8 +19,8 @@
     ]
   },
   "execution": {
-    "type": "inline",
-    "code": "direction = params.get('direction', 'forward').lower()\nif direction == 'up':\n    pose = create_head_pose(pitch=-30, degrees=True)\nelif direction == 'down':\n    pose = create_head_pose(pitch=30, degrees=True)\nelif direction == 'left':\n    pose = create_head_pose(yaw=45, degrees=True)\nelif direction == 'right':\n    pose = create_head_pose(yaw=-45, degrees=True)\nelse:\n    pose = create_head_pose()\npayload = {'head_pose': pose, 'duration': params.get('duration', 2.0)}\nreturn await make_request('POST', '/api/move/goto', json_data=payload)"
+    "type": "script",
+    "script_file": "look_at_direction.py"
   }
 }
 

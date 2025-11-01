@@ -6,8 +6,8 @@
     "optional": []
   },
   "execution": {
-    "type": "inline",
-    "code": "return await make_request('GET', '/api/state/full')"
+    "type": "script",
+    "script_file": "get_robot_state.py"
   }
 }
 

@@ -26,35 +26,23 @@ This document describes the schema for defining tools in the repository.
     ]
   },
   "execution": {
-    "type": "inline|script",
-    "code": "inline Python code (if type=inline)",
-    "script_file": "path/to/script.py (if type=script)"
+    "type": "script",
+    "script_file": "path/to/script.py"
   }
 }
 ```
 
-## Execution Types
+## Execution Type
 
-### Inline Code
-For simple operations, you can define the code directly in the JSON:
-- `type`: "inline"
-- `code`: Python code that uses available variables and helper functions
-- Available context:
-  - `params`: Dict of all parameters
-  - `make_request()`: Helper function for HTTP requests
-  - `create_head_pose()`: Helper function for creating head poses
-  - `asyncio`, `math`, `httpx` modules
-
-### Script File
-For complex operations, reference a separate Python file:
+All tools use script files for execution:
 - `type`: "script"
 - `script_file`: Relative path to script file from tools_repository/scripts/
-- The script should define an async `execute(**params)` function
+- The script should define an async `execute(make_request, create_head_pose, params)` function
 - Returns Dict[str, Any]
 
 ## Examples
 
-### Simple GET Request (Inline)
+### Simple GET Request
 ```json
 {
   "name": "get_robot_state",
@@ -64,8 +52,8 @@ For complex operations, reference a separate Python file:
     "optional": []
   },
   "execution": {
-    "type": "inline",
-    "code": "return await make_request('GET', '/api/state/full')"
+    "type": "script",
+    "script_file": "get_robot_state.py"
   }
 }
 ```

@@ -6,8 +6,8 @@
     "optional": []
   },
   "execution": {
-    "type": "inline",
-    "code": "payload = {'antennas': [0.0, 0.0], 'duration': 2.0}\nreturn await make_request('POST', '/api/move/goto', json_data=payload)"
+    "type": "script",
+    "script_file": "reset_antennas.py"
   }
 }
 

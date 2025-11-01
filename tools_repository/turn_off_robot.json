@@ -6,8 +6,8 @@
     "optional": []
   },
   "execution": {
-    "type": "inline",
-    "code": "return await make_request('POST', '/api/motors/set_mode/disabled')"
+    "type": "script",
+    "script_file": "turn_off_robot.py"
   }
 }
 

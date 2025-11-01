@@ -25,8 +25,8 @@
     ]
   },
   "execution": {
-    "type": "inline",
-    "code": "direction = params.get('direction', 'left')\nangle = params.get('angle', 15.0)\nroll_angle = angle if direction.lower() == 'left' else -angle\npose = create_head_pose(roll=roll_angle, degrees=True)\npayload = {'head_pose': pose, 'duration': params.get('duration', 2.0)}\nreturn await make_request('POST', '/api/move/goto', json_data=payload)"
+    "type": "script",
+    "script_file": "tilt_head.py"
   }
 }
 

@@ -177,37 +177,7 @@ def create_tool_function(tool_def: Dict[str, Any]):
     execution = tool_def.get("execution", {})
     exec_type = execution.get("type")
     
-    if exec_type == "inline":
-        # Create function that executes inline code
-        code = execution.get("code", "")
-        
-        async def tool_func_impl(*args, **kwargs):
-            # Create local context with helper functions
-            local_context = {
-                "make_request": make_request,
-                "create_head_pose": create_head_pose,
-                "params": kwargs,
-                "math": math,
-                "asyncio": asyncio,
-                "httpx": httpx
-            }
-            # Also add kwargs directly for easier access
-            local_context.update(kwargs)
-            
-            # Always use exec for inline code (handles both single and multiline)
-            exec_code = f"""
-async def __tool_exec():
-    {code if code.startswith(' ') or code.startswith('return') else '    ' + code.replace(chr(10), chr(10) + '    ')}
-"""
-            exec(exec_code, local_context)
-            return await local_context['__tool_exec']()
-        
-        # Create a new function with the proper signature and annotations
-        tool_func_impl.__signature__ = inspect.Signature(params)
-        tool_func_impl.__annotations__ = annotations
-        return tool_func_impl
-        
-    elif exec_type == "script":
+    if exec_type == "script":
         # Load the script module
         script_file = execution.get("script_file")
         module = load_script_module(script_file)
@@ -222,7 +192,7 @@ async def __tool_exec():
         return tool_func_impl
     
     else:
-        raise ValueError(f"Unknown execution type: {exec_type}")
+        raise ValueError(f"Unknown execution type: {exec_type}. Only 'script' type is supported.")
 
 
 def register_tools_from_repository():
