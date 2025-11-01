@@ -133,29 +133,46 @@ def load_script_module(script_file: str):
 
 def create_tool_function(tool_def: Dict[str, Any]):
     """Create a tool function from a tool definition."""
+    import inspect
     
-    # Determine parameter annotations
-    params_dict = {}
+    # Map JSON types to Python types
+    type_mapping = {
+        "string": str,
+        "number": float,
+        "boolean": bool,
+        "array": list,
+        "object": dict
+    }
+    
+    # Build parameter list for function signature
+    params = []
+    annotations = {}
+    required_params = tool_def.get("parameters", {}).get("required", [])
+    optional_params = tool_def.get("parameters", {}).get("optional", [])
     
     # Add required parameters
-    for param in tool_def.get("parameters", {}).get("required", []):
+    for param in required_params:
         param_name = param["name"]
-        param_type = param["type"]
-        
-        # Map JSON types to Python types
-        type_mapping = {
-            "string": str,
-            "number": float,
-            "boolean": bool,
-            "array": list,
-            "object": dict
-        }
-        params_dict[param_name] = type_mapping.get(param_type, Any)
+        param_type = type_mapping.get(param["type"], Any)
+        params.append(inspect.Parameter(
+            param_name,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            annotation=param_type
+        ))
+        annotations[param_name] = param_type
     
     # Add optional parameters with defaults
-    for param in tool_def.get("parameters", {}).get("optional", []):
+    for param in optional_params:
         param_name = param["name"]
-        params_dict[param_name] = Optional[Any]
+        default_value = param.get("default", None)
+        param_type = Optional[type_mapping.get(param["type"], Any)]
+        params.append(inspect.Parameter(
+            param_name,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            default=default_value,
+            annotation=param_type
+        ))
+        annotations[param_name] = param_type
     
     execution = tool_def.get("execution", {})
     exec_type = execution.get("type")
@@ -164,7 +181,7 @@ def create_tool_function(tool_def: Dict[str, Any]):
         # Create function that executes inline code
         code = execution.get("code", "")
         
-        async def tool_func(**kwargs):
+        async def tool_func_impl(*args, **kwargs):
             # Create local context with helper functions
             local_context = {
                 "make_request": make_request,
@@ -177,22 +194,32 @@ def create_tool_function(tool_def: Dict[str, Any]):
             # Also add kwargs directly for easier access
             local_context.update(kwargs)
             
-            # Execute the inline code
-            exec_result = eval(f"(async lambda: {code})()", local_context)
-            return await exec_result
+            # Always use exec for inline code (handles both single and multiline)
+            exec_code = f"""
+async def __tool_exec():
+    {code if code.startswith(' ') or code.startswith('return') else '    ' + code.replace(chr(10), chr(10) + '    ')}
+"""
+            exec(exec_code, local_context)
+            return await local_context['__tool_exec']()
         
-        return tool_func
+        # Create a new function with the proper signature and annotations
+        tool_func_impl.__signature__ = inspect.Signature(params)
+        tool_func_impl.__annotations__ = annotations
+        return tool_func_impl
         
     elif exec_type == "script":
         # Load the script module
         script_file = execution.get("script_file")
         module = load_script_module(script_file)
         
-        async def tool_func(**kwargs):
+        async def tool_func_impl(*args, **kwargs):
             # Call the execute function from the script
             return await module.execute(make_request, create_head_pose, kwargs)
         
-        return tool_func
+        # Create a new function with the proper signature and annotations
+        tool_func_impl.__signature__ = inspect.Signature(params)
+        tool_func_impl.__annotations__ = annotations
+        return tool_func_impl
     
     else:
         raise ValueError(f"Unknown execution type: {exec_type}")
@@ -231,7 +258,9 @@ def register_tools_from_repository():
                 print(f"✓ Registered tool: {tool_name}")
                 
             except Exception as e:
+                import traceback
                 print(f"✗ Failed to register tool {tool_name}: {e}")
+                print(f"  Traceback: {traceback.format_exc()}")
         
         print(f"\n✓ Successfully registered {len([t for t in index.get('tools', []) if t.get('enabled', True)])} tools")
         print(f"✓ Tool registry contains {len(TOOL_REGISTRY)} tools available for dynamic execution")
@@ -330,8 +359,17 @@ def register_tool_to_registry(tool_name: str, tool_func):
     TOOL_REGISTRY[tool_name] = tool_func
 
 
+def get_tool_registry() -> Dict[str, Any]:
+    """Get the current tool registry. Ensures it's loaded."""
+    if not TOOL_REGISTRY:
+        # This shouldn't happen if initialize_server was called
+        # but provides a safety net
+        print("WARNING: Tool registry is empty. This should not happen in normal operation.")
+    return TOOL_REGISTRY
+
+
 # Meta-tool for operating the robot dynamically
-@mcp.tool()
+# Note: This is registered manually in initialize_server() after all tools are loaded
 async def operate_robot(tool_name: str, parameters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     Execute any robot control tool dynamically based on tools_index.json.
@@ -382,18 +420,22 @@ async def operate_robot(tool_name: str, parameters: Optional[Dict[str, Any]] = N
     if parameters is None:
         parameters = {}
     
+    # Get the current tool registry
+    registry = get_tool_registry()
+    
     # Check if tool exists in registry
-    if tool_name not in TOOL_REGISTRY:
-        available_tools = ", ".join(sorted(TOOL_REGISTRY.keys()))
+    if tool_name not in registry:
+        available_tools = ", ".join(sorted(registry.keys()))
         return {
             "error": f"Tool '{tool_name}' not found",
             "available_tools": available_tools,
+            "registry_size": len(registry),
             "status": "failed"
         }
     
     try:
         # Execute the tool
-        tool_func = TOOL_REGISTRY[tool_name]
+        tool_func = registry[tool_name]
         result = await tool_func(**parameters)
         return {
             "tool": tool_name,
@@ -424,14 +466,21 @@ def initialize_server():
     # Register all tools from repository
     register_tools_from_repository()
     
+    # Register the operate_robot meta-tool AFTER all tools are loaded
+    mcp.tool()(operate_robot)
+    print("✓ Registered meta-tool: operate_robot")
+    
     print("=" * 60)
     print("Server initialized and ready!")
     print("=" * 60)
 
 
 if __name__ == "__main__":
-    # Initialize the server
+    # Initialize the server and load all tools BEFORE FastMCP starts
     initialize_server()
     
     # Run the MCP server
     mcp.run()
+else:
+    # If imported as a module, initialize immediately
+    initialize_server()

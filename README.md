@@ -95,6 +95,27 @@ The MCP server will now be running and ready to accept connections from MCP clie
 
 ## Available MCP Tools
 
+### Meta-Tool: Dynamic Robot Control
+
+| Tool | Description |
+|------|-------------|
+| `operate_robot(tool_name, parameters)` | **Meta-tool** to dynamically execute any robot control tool by name. See all available tools below. |
+
+This powerful meta-tool allows you to call any of the robot control tools dynamically:
+
+```python
+# Example: Get robot state
+operate_robot("get_robot_state")
+
+# Example: Express emotion with parameters
+operate_robot("express_emotion", {"emotion": "happy"})
+
+# Example: Move head with multiple parameters
+operate_robot("move_head", {"z": 10, "duration": 2.0, "mm": True})
+```
+
+**Note:** The tool name must match exactly. The correct tool is `get_robot_state`, not `get_robot_status`.
+
 ### Basic State & Control
 
 | Tool | Description |
