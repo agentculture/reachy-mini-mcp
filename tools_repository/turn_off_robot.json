@@ -1,0 +1,13 @@
+{
+  "name": "turn_off_robot",
+  "description": "Turn off the robot's motors and deactivate systems.\n\nThis powers down the robot safely. Use this when done controlling the robot.",
+  "parameters": {
+    "required": [],
+    "optional": []
+  },
+  "execution": {
+    "type": "inline",
+    "code": "return await make_request('POST', '/api/motors/set_mode/disabled')"
+  }
+}
+

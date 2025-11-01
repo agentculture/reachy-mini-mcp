@@ -321,38 +321,91 @@ The server includes helpful prompts:
 
 ## Development
 
+### Repository-Based Tool System
+
+This MCP server uses a **repository-based approach** for defining tools, making it highly extensible and customizable. Tools are defined in JSON files rather than hardcoded in Python.
+
+**Key Benefits:**
+- ✅ Add new tools without modifying server code
+- ✅ Customize tool behavior by editing JSON files
+- ✅ Easy to version control and share tool definitions
+- ✅ Simple inline code or complex script-based execution
+
+**Repository Structure:**
+```
+tools_repository/
+├── tools_index.json          # Root file listing all tools
+├── *.json                    # Individual tool definitions
+└── scripts/                  # Python scripts for complex tools
+    ├── nod_head.py
+    ├── shake_head.py
+    ├── express_emotion.py
+    └── perform_gesture.py
+```
+
 ### Adding New Tools
 
-To add new MCP tools, use the `@mcp.tool()` decorator:
+#### Method 1: Simple Inline Tool
+
+Create a JSON file (e.g., `tools_repository/my_tool.json`):
+
+```json
+{
+  "name": "my_tool",
+  "description": "Description of what my tool does",
+  "parameters": {
+    "required": [
+      {"name": "param1", "type": "string", "description": "First parameter"}
+    ],
+    "optional": [
+      {"name": "param2", "type": "number", "default": 1.0, "description": "Second parameter"}
+    ]
+  },
+  "execution": {
+    "type": "inline",
+    "code": "return await make_request('POST', '/api/endpoint', json_data={'key': params.get('param1')})"
+  }
+}
+```
+
+Add to `tools_repository/tools_index.json`:
+```json
+{
+  "name": "my_tool",
+  "enabled": true,
+  "definition_file": "my_tool.json"
+}
+```
+
+Restart the server - your tool is now available!
+
+#### Method 2: Complex Script-Based Tool
+
+For multi-step operations, create a Python script in `tools_repository/scripts/my_tool.py`:
 
 ```python
-@mcp.tool()
-async def my_custom_tool(param1: str, param2: int) -> Dict[str, Any]:
-    """
-    Description of what this tool does.
-    
-    Args:
-        param1: Description of param1
-        param2: Description of param2
-    """
-    # Your implementation
-    return await make_request("POST", "/api/endpoint", json_data={...})
+async def execute(make_request, create_head_pose, params):
+    """Execute the tool."""
+    # Your complex logic here
+    await make_request("POST", "/api/endpoint1", json_data={...})
+    await asyncio.sleep(1.0)
+    await make_request("POST", "/api/endpoint2", json_data={...})
+    return {"status": "success"}
 ```
+
+Then create the JSON definition with `"type": "script"` and `"script_file": "my_tool.py"`.
+
+See `tools_repository/README.md` for detailed documentation.
 
 ### Testing Tools
 
-You can test individual tools by running them directly:
+Validate your tool definitions:
 
-```python
-import asyncio
-from server import get_robot_state
-
-async def test():
-    result = await get_robot_state()
-    print(result)
-
-asyncio.run(test())
+```bash
+python test_repository.py
 ```
+
+This verifies all JSON files are valid and script files exist.
 
 ## Resources
 

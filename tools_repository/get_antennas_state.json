@@ -1,0 +1,13 @@
+{
+  "name": "get_antennas_state",
+  "description": "Get the current state of the robot's antennas.\n\nReturns the current position of left and right antennas.",
+  "parameters": {
+    "required": [],
+    "optional": []
+  },
+  "execution": {
+    "type": "inline",
+    "code": "full_state = await make_request('GET', '/api/state/full')\nif 'antennas_position' in full_state:\n    return {'antennas_position': full_state['antennas_position']}\nreturn full_state"
+  }
+}
+

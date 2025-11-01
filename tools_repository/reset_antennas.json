@@ -1,0 +1,13 @@
+{
+  "name": "reset_antennas",
+  "description": "Reset both antennas to their neutral position (0 degrees).",
+  "parameters": {
+    "required": [],
+    "optional": []
+  },
+  "execution": {
+    "type": "inline",
+    "code": "payload = {'antennas': [0.0, 0.0], 'duration': 2.0}\nreturn await make_request('POST', '/api/move/goto', json_data=payload)"
+  }
+}
+

@@ -5,19 +5,26 @@ A Model Context Protocol (MCP) server for controlling the Reachy Mini robot.
 This server provides tools to control the robot's head, antennas, camera, and more.
 
 The server communicates with the Reachy Mini daemon running on localhost:8000.
+
+This version uses a repository-based approach for defining tools dynamically.
 """
 
 import httpx
+import json
+import os
+import math
+import asyncio
+import importlib.util
+from pathlib import Path
 from typing import Optional, Dict, Any, List
 from fastmcp import FastMCP
-import asyncio
-import math
 
 # Initialize FastMCP server
 mcp = FastMCP("Reachy Mini Controller")
 
 # Configuration
 REACHY_BASE_URL = "http://localhost:8000"
+TOOLS_REPOSITORY_PATH = Path(__file__).parent / "tools_repository"
 
 
 # Helper functions
@@ -90,437 +97,148 @@ async def make_request(
             return {"error": str(e), "status": "failed"}
 
 
-# MCP Tools
+# Dynamic tool loading functions
 
-@mcp.tool()
-async def get_robot_state() -> Dict[str, Any]:
-    """
-    Get the current full state of the Reachy Mini robot.
+def load_tool_index() -> Dict[str, Any]:
+    """Load the tool index from tools_index.json."""
+    index_path = TOOLS_REPOSITORY_PATH / "tools_index.json"
+    if not index_path.exists():
+        raise FileNotFoundError(f"Tool index not found at {index_path}")
     
-    Returns detailed information about:
-    - Motors (head, antennas) and their current positions
-    - Camera status
-    - Power state
-    - Connection status
-    """
-    return await make_request("GET", "/api/state/full")
+    with open(index_path, 'r') as f:
+        return json.load(f)
 
 
-@mcp.tool()
-async def get_head_state() -> Dict[str, Any]:
-    """
-    Get the current state of the robot's head.
+def load_tool_definition(definition_file: str) -> Dict[str, Any]:
+    """Load a tool definition from a JSON file."""
+    def_path = TOOLS_REPOSITORY_PATH / definition_file
+    if not def_path.exists():
+        raise FileNotFoundError(f"Tool definition not found at {def_path}")
     
-    Returns the head's current position (x, y, z) and orientation (roll, pitch, yaw).
-    """
-    full_state = await make_request("GET", "/api/state/full")
-    if "head_pose" in full_state:
-        return {"head_pose": full_state["head_pose"]}
-    return full_state
+    with open(def_path, 'r') as f:
+        return json.load(f)
 
 
-@mcp.tool()
-async def move_head(
-    x: float = 0.0,
-    y: float = 0.0,
-    z: float = 0.0,
-    roll: float = 0.0,
-    pitch: float = 0.0,
-    yaw: float = 0.0,
-    duration: float = 2.0,
-    degrees: bool = True,
-    mm: bool = True
-) -> Dict[str, Any]:
-    """
-    Move the robot's head to a target pose.
+def load_script_module(script_file: str):
+    """Dynamically load a Python script as a module."""
+    script_path = TOOLS_REPOSITORY_PATH / "scripts" / script_file
+    if not script_path.exists():
+        raise FileNotFoundError(f"Script not found at {script_path}")
     
-    Args:
-        x: X position offset (millimeters by default)
-        y: Y position offset (millimeters by default)
-        z: Z position offset (millimeters by default)
-        roll: Roll angle (degrees by default)
-        pitch: Pitch angle (degrees by default)
-        yaw: Yaw angle (degrees by default)
-        duration: Duration of the movement in seconds
-        degrees: If True (default), angles are in degrees
-        mm: If True (default), positions are in millimeters
-    
-    Example:
-        Move head up 10mm and roll 15 degrees:
-        move_head(z=10, roll=15, duration=2.0)
-    """
-    pose = create_head_pose(x, y, z, roll, pitch, yaw, degrees, mm)
-    
-    payload = {
-        "head_pose": pose,
-        "duration": duration
-    }
-    
-    return await make_request("POST", "/api/move/goto", json_data=payload)
+    spec = importlib.util.spec_from_file_location("tool_script", script_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
-@mcp.tool()
-async def reset_head() -> Dict[str, Any]:
-    """
-    Reset the robot's head to the default neutral position.
+def create_tool_function(tool_def: Dict[str, Any]):
+    """Create a tool function from a tool definition."""
     
-    This moves the head to (0, 0, 0) position with (0, 0, 0) orientation over 2 seconds.
-    """
-    pose = create_head_pose()
-    payload = {
-        "head_pose": pose,
-        "duration": 2.0
-    }
-    return await make_request("POST", "/api/move/goto", json_data=payload)
-
-
-@mcp.tool()
-async def nod_head(duration: float = 1.0, angle: float = 15.0) -> Dict[str, Any]:
-    """
-    Make the robot nod its head (pitch up and down).
+    # Determine parameter annotations
+    params_dict = {}
     
-    Args:
-        duration: Duration for each movement in seconds
-        angle: Angle to pitch in degrees (default 15 degrees)
+    # Add required parameters
+    for param in tool_def.get("parameters", {}).get("required", []):
+        param_name = param["name"]
+        param_type = param["type"]
+        
+        # Map JSON types to Python types
+        type_mapping = {
+            "string": str,
+            "number": float,
+            "boolean": bool,
+            "array": list,
+            "object": dict
+        }
+        params_dict[param_name] = type_mapping.get(param_type, Any)
     
-    This performs a nod gesture by pitching the head forward and then back to neutral.
-    """
-    # Nod down
-    pose_down = create_head_pose(pitch=angle, degrees=True)
-    await make_request("POST", "/api/move/goto", json_data={"head_pose": pose_down, "duration": duration})
+    # Add optional parameters with defaults
+    for param in tool_def.get("parameters", {}).get("optional", []):
+        param_name = param["name"]
+        params_dict[param_name] = Optional[Any]
     
-    # Wait for movement to complete
-    await asyncio.sleep(duration)
+    execution = tool_def.get("execution", {})
+    exec_type = execution.get("type")
     
-    # Return to neutral
-    pose_neutral = create_head_pose()
-    return await make_request("POST", "/api/move/goto", json_data={"head_pose": pose_neutral, "duration": duration})
-
-
-@mcp.tool()
-async def shake_head(duration: float = 1.0, angle: float = 20.0) -> Dict[str, Any]:
-    """
-    Make the robot shake its head (yaw left and right).
+    if exec_type == "inline":
+        # Create function that executes inline code
+        code = execution.get("code", "")
+        
+        async def tool_func(**kwargs):
+            # Create local context with helper functions
+            local_context = {
+                "make_request": make_request,
+                "create_head_pose": create_head_pose,
+                "params": kwargs,
+                "math": math,
+                "asyncio": asyncio,
+                "httpx": httpx
+            }
+            # Also add kwargs directly for easier access
+            local_context.update(kwargs)
+            
+            # Execute the inline code
+            exec_result = eval(f"(async lambda: {code})()", local_context)
+            return await exec_result
+        
+        return tool_func
+        
+    elif exec_type == "script":
+        # Load the script module
+        script_file = execution.get("script_file")
+        module = load_script_module(script_file)
+        
+        async def tool_func(**kwargs):
+            # Call the execute function from the script
+            return await module.execute(make_request, create_head_pose, kwargs)
+        
+        return tool_func
     
-    Args:
-        duration: Duration for each movement in seconds
-        angle: Angle to yaw in degrees (default 20 degrees)
-    
-    This performs a head shake gesture by yawing left, then right, then back to neutral.
-    """
-    # Shake left
-    pose_left = create_head_pose(yaw=-angle, degrees=True)
-    await make_request("POST", "/api/move/goto", json_data={"head_pose": pose_left, "duration": duration})
-    await asyncio.sleep(duration)
-    
-    # Shake right
-    pose_right = create_head_pose(yaw=angle, degrees=True)
-    await make_request("POST", "/api/move/goto", json_data={"head_pose": pose_right, "duration": duration})
-    await asyncio.sleep(duration)
-    
-    # Return to neutral
-    pose_neutral = create_head_pose()
-    return await make_request("POST", "/api/move/goto", json_data={"head_pose": pose_neutral, "duration": duration})
-
-
-@mcp.tool()
-async def tilt_head(direction: str = "left", angle: float = 15.0, duration: float = 2.0) -> Dict[str, Any]:
-    """
-    Tilt the robot's head to the left or right.
-    
-    Args:
-        direction: "left" or "right"
-        angle: Angle to roll in degrees (default 15 degrees)
-        duration: Duration of the movement in seconds
-    
-    This rolls the head to create a tilting motion.
-    """
-    roll_angle = angle if direction.lower() == "left" else -angle
-    pose = create_head_pose(roll=roll_angle, degrees=True)
-    
-    payload = {
-        "head_pose": pose,
-        "duration": duration
-    }
-    return await make_request("POST", "/api/move/goto", json_data=payload)
-
-
-@mcp.tool()
-async def get_antennas_state() -> Dict[str, Any]:
-    """
-    Get the current state of the robot's antennas.
-    
-    Returns the current position of left and right antennas.
-    """
-    full_state = await make_request("GET", "/api/state/full")
-    if "antennas_position" in full_state:
-        return {"antennas_position": full_state["antennas_position"]}
-    return full_state
-
-
-@mcp.tool()
-async def move_antennas(
-    left: Optional[float] = None,
-    right: Optional[float] = None,
-    duration: float = 2.0
-) -> Dict[str, Any]:
-    """
-    Move the robot's antennas.
-    
-    Args:
-        left: Target position for left antenna (degrees, typically -45 to 45)
-        right: Target position for right antenna (degrees, typically -45 to 45)
-        duration: Duration of the movement in seconds
-    
-    You can move one or both antennas. Leave None to keep current position.
-    """
-    # Build antennas array [left, right] - need both values
-    antennas_array = []
-    if left is not None and right is not None:
-        # Convert degrees to radians
-        antennas_array = [math.radians(left), math.radians(right)]
     else:
-        # If only one is specified, we can't proceed without knowing current state
-        return {"error": "Both left and right antenna positions must be specified", "status": "failed"}
-    
-    payload = {
-        "antennas": antennas_array,
-        "duration": duration
-    }
-    
-    return await make_request("POST", "/api/move/goto", json_data=payload)
+        raise ValueError(f"Unknown execution type: {exec_type}")
 
 
-@mcp.tool()
-async def reset_antennas() -> Dict[str, Any]:
-    """
-    Reset both antennas to their neutral position (0 degrees).
-    """
-    payload = {
-        "antennas": [0.0, 0.0],
-        "duration": 2.0
-    }
-    return await make_request("POST", "/api/move/goto", json_data=payload)
-
-
-@mcp.tool()
-async def get_camera_image() -> Dict[str, Any]:
-    """
-    Capture an image from the robot's camera.
-    
-    Returns the camera image data and metadata.
-    Note: The actual image data will be in the response.
-    """
-    # Note: The daemon API doesn't provide camera access
-    # This would need to be implemented separately
-    return {"error": "Camera access not available through this API", "status": "not_implemented"}
-
-
-@mcp.tool()
-async def get_camera_state() -> Dict[str, Any]:
-    """
-    Get the current state of the robot's camera.
-    
-    Returns information about camera status, resolution, and settings.
-    """
-    # Note: The actual daemon may not provide camera state info
-    # This is a placeholder that returns what's available
-    return {"status": "Camera state not available from this API endpoint"}
-
-
-@mcp.tool()
-async def turn_on_robot() -> Dict[str, Any]:
-    """
-    Turn on the robot's motors and activate all systems.
-    
-    This powers up the robot and makes it ready to receive movement commands.
-    """
-    return await make_request("POST", "/api/motors/set_mode/enabled")
-
-
-@mcp.tool()
-async def turn_off_robot() -> Dict[str, Any]:
-    """
-    Turn off the robot's motors and deactivate systems.
-    
-    This powers down the robot safely. Use this when done controlling the robot.
-    """
-    return await make_request("POST", "/api/motors/set_mode/disabled")
-
-
-@mcp.tool()
-async def get_power_state() -> Dict[str, Any]:
-    """
-    Get the current power state of the robot.
-    
-    Returns whether the robot is powered on or off.
-    """
-    return await make_request("GET", "/api/motors/status")
-
-
-@mcp.tool()
-async def stop_all_movements() -> Dict[str, Any]:
-    """
-    Emergency stop - immediately halt all robot movements.
-    
-    This stops the head and antennas in their current positions.
-    """
-    # The daemon doesn't have a direct stop endpoint
-    # We can disable motors to stop movements
-    return await make_request("POST", "/api/motors/set_mode/disabled")
-
-
-@mcp.tool()
-async def express_emotion(emotion: str) -> Dict[str, Any]:
-    """
-    Make the robot express an emotion using head and antenna movements.
-    
-    Args:
-        emotion: One of: "happy", "sad", "curious", "surprised", "confused", "neutral"
-    
-    This combines head and antenna movements to create emotional expressions.
-    """
-    emotion = emotion.lower()
-    
-    if emotion == "happy":
-        # Lift head slightly and antennas up
-        head_pose = create_head_pose(z=5, pitch=-5, degrees=True, mm=True)
-        await make_request("POST", "/api/move/goto", json_data={
-            "head_pose": head_pose,
-            "antennas": [math.radians(30), math.radians(30)],
-            "duration": 1.5
-        })
+def register_tools_from_repository():
+    """Load and register all tools from the repository."""
+    try:
+        index = load_tool_index()
         
-    elif emotion == "sad":
-        # Lower head and antennas down
-        head_pose = create_head_pose(z=-5, pitch=10, degrees=True, mm=True)
-        await make_request("POST", "/api/move/goto", json_data={
-            "head_pose": head_pose,
-            "antennas": [math.radians(-20), math.radians(-20)],
-            "duration": 2.0
-        })
+        for tool_entry in index.get("tools", []):
+            # Skip disabled tools
+            if not tool_entry.get("enabled", True):
+                continue
+            
+            tool_name = tool_entry.get("name")
+            definition_file = tool_entry.get("definition_file")
+            
+            try:
+                # Load tool definition
+                tool_def = load_tool_definition(definition_file)
+                
+                # Create the tool function
+                tool_func = create_tool_function(tool_def)
+                
+                # Set the function name and docstring
+                tool_func.__name__ = tool_name
+                tool_func.__doc__ = tool_def.get("description", "")
+                
+                # Register with FastMCP
+                mcp.tool()(tool_func)
+                
+                # Also register in the global registry for operate_robot tool
+                register_tool_to_registry(tool_name, tool_func)
+                
+                print(f"✓ Registered tool: {tool_name}")
+                
+            except Exception as e:
+                print(f"✗ Failed to register tool {tool_name}: {e}")
         
-    elif emotion == "curious":
-        # Tilt head to the side
-        head_pose = create_head_pose(roll=20, degrees=True)
-        await make_request("POST", "/api/move/goto", json_data={
-            "head_pose": head_pose,
-            "antennas": [math.radians(15), math.radians(-15)],
-            "duration": 1.5
-        })
+        print(f"\n✓ Successfully registered {len([t for t in index.get('tools', []) if t.get('enabled', True)])} tools")
+        print(f"✓ Tool registry contains {len(TOOL_REGISTRY)} tools available for dynamic execution")
         
-    elif emotion == "surprised":
-        # Quick upward movement
-        head_pose = create_head_pose(z=10, pitch=-15, degrees=True, mm=True)
-        await make_request("POST", "/api/move/goto", json_data={
-            "head_pose": head_pose,
-            "antennas": [math.radians(45), math.radians(45)],
-            "duration": 0.8
-        })
-        
-    elif emotion == "confused":
-        # Alternate antenna positions
-        head_pose = create_head_pose(roll=15, degrees=True)
-        await make_request("POST", "/api/move/goto", json_data={
-            "head_pose": head_pose,
-            "antennas": [math.radians(25), math.radians(-25)],
-            "duration": 1.5
-        })
-        
-    else:  # neutral
-        return await reset_head()
-    
-    return {"status": "success", "emotion": emotion}
-
-
-@mcp.tool()
-async def look_at_direction(direction: str, duration: float = 2.0) -> Dict[str, Any]:
-    """
-    Make the robot look in a specific direction.
-    
-    Args:
-        direction: One of: "up", "down", "left", "right", "forward"
-        duration: Duration of the movement in seconds
-    
-    This moves the head to look in the specified direction.
-    """
-    direction = direction.lower()
-    
-    if direction == "up":
-        pose = create_head_pose(pitch=-30, degrees=True)
-    elif direction == "down":
-        pose = create_head_pose(pitch=30, degrees=True)
-    elif direction == "left":
-        pose = create_head_pose(yaw=45, degrees=True)
-    elif direction == "right":
-        pose = create_head_pose(yaw=-45, degrees=True)
-    else:  # forward/neutral
-        pose = create_head_pose()
-    
-    payload = {
-        "head_pose": pose,
-        "duration": duration
-    }
-    return await make_request("POST", "/api/move/goto", json_data=payload)
-
-
-@mcp.tool()
-async def perform_gesture(gesture: str) -> Dict[str, Any]:
-    """
-    Perform a predefined gesture sequence.
-    
-    Args:
-        gesture: One of: "greeting", "yes", "no", "thinking", "celebration"
-    
-    This executes a sequence of movements to perform the specified gesture.
-    """
-    gesture = gesture.lower()
-    
-    if gesture == "greeting":
-        # Wave with head and antennas
-        await nod_head(duration=0.8, angle=10)
-        await asyncio.sleep(0.5)
-        await move_antennas(left=30, right=30, duration=0.5)
-        await asyncio.sleep(0.5)
-        await reset_antennas()
-        
-    elif gesture == "yes":
-        # Nod yes
-        return await nod_head(duration=0.8, angle=20)
-        
-    elif gesture == "no":
-        # Shake no
-        return await shake_head(duration=0.7, angle=25)
-        
-    elif gesture == "thinking":
-        # Tilt head and one antenna
-        head_pose = create_head_pose(roll=15, pitch=5, degrees=True)
-        await make_request("POST", "/api/move/goto", json_data={
-            "head_pose": head_pose,
-            "antennas": [math.radians(20), math.radians(-10)],
-            "duration": 1.5
-        })
-        
-    elif gesture == "celebration":
-        # Excited movements
-        for _ in range(2):
-            await move_antennas(left=40, right=40, duration=0.4)
-            await asyncio.sleep(0.4)
-            await move_antennas(left=-20, right=-20, duration=0.4)
-            await asyncio.sleep(0.4)
-        await reset_antennas()
-    
-    return {"status": "success", "gesture": gesture}
-
-
-@mcp.tool()
-async def get_health_status() -> Dict[str, Any]:
-    """
-    Get the overall health status of the robot.
-    
-    Returns information about system health, temperature, and any warnings.
-    """
-    return await make_request("GET", "/api/daemon/status")
+    except Exception as e:
+        print(f"✗ Failed to load tools from repository: {e}")
+        raise
 
 
 # Resources
@@ -528,8 +246,8 @@ async def get_health_status() -> Dict[str, Any]:
 @mcp.resource("reachy://status")
 async def get_status_resource() -> str:
     """Get robot status as a formatted resource."""
-    state = await get_robot_state()
-    return f"Reachy Mini Status:\n{state}"
+    state = await make_request("GET", "/api/state/full")
+    return f"Reachy Mini Status:\n{json.dumps(state, indent=2)}"
 
 
 @mcp.resource("reachy://capabilities")
@@ -604,8 +322,116 @@ Antenna Limits:
 """
 
 
+# Tool registry for dynamic tool execution
+TOOL_REGISTRY = {}
+
+def register_tool_to_registry(tool_name: str, tool_func):
+    """Register a tool in the global registry for dynamic execution."""
+    TOOL_REGISTRY[tool_name] = tool_func
+
+
+# Meta-tool for operating the robot dynamically
+@mcp.tool()
+async def operate_robot(tool_name: str, parameters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Execute any robot control tool dynamically based on tools_index.json.
+    
+    This is a meta-tool that allows you to call any of the available robot control tools
+    by specifying the tool name and parameters.
+    
+    Available tools (from tools_index.json):
+    - get_robot_state: Get full robot state including all components
+    - get_head_state: Get current head position and orientation
+    - move_head: Move head to specific pose (params: x, y, z, roll, pitch, yaw, duration)
+    - reset_head: Return head to neutral position
+    - nod_head: Make robot nod (params: duration, angle)
+    - shake_head: Make robot shake head (params: duration, angle)
+    - tilt_head: Tilt head left or right (params: direction, angle, duration)
+    - get_antennas_state: Get current antenna positions
+    - move_antennas: Move antennas to specific positions (params: left, right, duration)
+    - reset_antennas: Return antennas to neutral position
+    - turn_on_robot: Power on the robot
+    - turn_off_robot: Power off the robot
+    - get_power_state: Check if robot is powered on/off
+    - stop_all_movements: Emergency stop all movements
+    - express_emotion: Express emotion (params: emotion - happy/sad/curious/surprised/confused)
+    - look_at_direction: Look in a direction (params: direction - up/down/left/right/forward, duration)
+    - perform_gesture: Perform gesture (params: gesture - greeting/yes/no/thinking/celebration)
+    - get_health_status: Get overall health status
+    
+    Args:
+        tool_name: Name of the tool to execute (from the list above)
+        parameters: Dictionary of parameters to pass to the tool (optional)
+    
+    Returns:
+        Result from the executed tool
+        
+    Examples:
+        # Express happiness
+        operate_robot("express_emotion", {"emotion": "happy"})
+        
+        # Move head up
+        operate_robot("move_head", {"z": 10, "duration": 2.0})
+        
+        # Get robot state
+        operate_robot("get_robot_state")
+        
+        # Perform greeting gesture
+        operate_robot("perform_gesture", {"gesture": "greeting"})
+    """
+    if parameters is None:
+        parameters = {}
+    
+    # Check if tool exists in registry
+    if tool_name not in TOOL_REGISTRY:
+        available_tools = ", ".join(sorted(TOOL_REGISTRY.keys()))
+        return {
+            "error": f"Tool '{tool_name}' not found",
+            "available_tools": available_tools,
+            "status": "failed"
+        }
+    
+    try:
+        # Execute the tool
+        tool_func = TOOL_REGISTRY[tool_name]
+        result = await tool_func(**parameters)
+        return {
+            "tool": tool_name,
+            "parameters": parameters,
+            "result": result,
+            "status": "success"
+        }
+    except Exception as e:
+        return {
+            "tool": tool_name,
+            "parameters": parameters,
+            "error": str(e),
+            "status": "failed"
+        }
+
+
+# Initialize and run
+
+def initialize_server():
+    """Initialize the server by loading all tools from the repository."""
+    print("=" * 60)
+    print("Reachy Mini MCP Server - Repository-Based Tool Loading")
+    print("=" * 60)
+    print(f"Tools repository path: {TOOLS_REPOSITORY_PATH}")
+    print(f"Reachy daemon URL: {REACHY_BASE_URL}")
+    print("-" * 60)
+    
+    # Register all tools from repository
+    register_tools_from_repository()
+    
+    print("=" * 60)
+    print("Server initialized and ready!")
+    print("=" * 60)
+
+
 if __name__ == "__main__":
+    # Initialize the server
+    initialize_server()
+    
     # Run the MCP server
     mcp.run()
-
-

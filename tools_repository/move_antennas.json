@@ -1,0 +1,32 @@
+{
+  "name": "move_antennas",
+  "description": "Move the robot's antennas.\n\nYou can move one or both antennas. Leave None to keep current position.",
+  "parameters": {
+    "required": [],
+    "optional": [
+      {
+        "name": "left",
+        "type": "number",
+        "default": null,
+        "description": "Target position for left antenna (degrees, typically -45 to 45)"
+      },
+      {
+        "name": "right",
+        "type": "number",
+        "default": null,
+        "description": "Target position for right antenna (degrees, typically -45 to 45)"
+      },
+      {
+        "name": "duration",
+        "type": "number",
+        "default": 2.0,
+        "description": "Duration of the movement in seconds"
+      }
+    ]
+  },
+  "execution": {
+    "type": "inline",
+    "code": "import math\nleft = params.get('left')\nright = params.get('right')\nif left is not None and right is not None:\n    antennas_array = [math.radians(left), math.radians(right)]\n    payload = {'antennas': antennas_array, 'duration': params.get('duration', 2.0)}\n    return await make_request('POST', '/api/move/goto', json_data=payload)\nelse:\n    return {'error': 'Both left and right antenna positions must be specified', 'status': 'failed'}"
+  }
+}
+

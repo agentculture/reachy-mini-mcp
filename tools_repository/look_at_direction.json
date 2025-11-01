@@ -1,0 +1,26 @@
+{
+  "name": "look_at_direction",
+  "description": "Make the robot look in a specific direction.\n\nThis moves the head to look in the specified direction.",
+  "parameters": {
+    "required": [
+      {
+        "name": "direction",
+        "type": "string",
+        "description": "One of: 'up', 'down', 'left', 'right', 'forward'"
+      }
+    ],
+    "optional": [
+      {
+        "name": "duration",
+        "type": "number",
+        "default": 2.0,
+        "description": "Duration of the movement in seconds"
+      }
+    ]
+  },
+  "execution": {
+    "type": "inline",
+    "code": "direction = params.get('direction', 'forward').lower()\nif direction == 'up':\n    pose = create_head_pose(pitch=-30, degrees=True)\nelif direction == 'down':\n    pose = create_head_pose(pitch=30, degrees=True)\nelif direction == 'left':\n    pose = create_head_pose(yaw=45, degrees=True)\nelif direction == 'right':\n    pose = create_head_pose(yaw=-45, degrees=True)\nelse:\n    pose = create_head_pose()\npayload = {'head_pose': pose, 'duration': params.get('duration', 2.0)}\nreturn await make_request('POST', '/api/move/goto', json_data=payload)"
+  }
+}
+

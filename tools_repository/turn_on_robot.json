@@ -1,0 +1,13 @@
+{
+  "name": "turn_on_robot",
+  "description": "Turn on the robot's motors and activate all systems.\n\nThis powers up the robot and makes it ready to receive movement commands.",
+  "parameters": {
+    "required": [],
+    "optional": []
+  },
+  "execution": {
+    "type": "inline",
+    "code": "return await make_request('POST', '/api/motors/set_mode/enabled')"
+  }
+}
+

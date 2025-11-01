@@ -1,0 +1,13 @@
+{
+  "name": "reset_head",
+  "description": "Reset the robot's head to the default neutral position.\n\nThis moves the head to (0, 0, 0) position with (0, 0, 0) orientation over 2 seconds.",
+  "parameters": {
+    "required": [],
+    "optional": []
+  },
+  "execution": {
+    "type": "inline",
+    "code": "pose = create_head_pose()\npayload = {'head_pose': pose, 'duration': 2.0}\nreturn await make_request('POST', '/api/move/goto', json_data=payload)"
+  }
+}
+
