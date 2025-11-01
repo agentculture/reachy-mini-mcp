@@ -249,21 +249,19 @@ def register_tools_from_repository():
                 tool_func.__name__ = tool_name
                 tool_func.__doc__ = tool_def.get("description", "")
                 
-                # Register with FastMCP
-                mcp.tool()(tool_func)
-                
-                # Also register in the global registry for operate_robot tool
+                # Only register in the global registry for operate_robot tool
+                # Individual tools are NOT registered as MCP tools - only operate_robot is exposed
                 register_tool_to_registry(tool_name, tool_func)
                 
-                print(f"✓ Registered tool: {tool_name}")
+                print(f"✓ Loaded tool to registry: {tool_name}")
                 
             except Exception as e:
                 import traceback
                 print(f"✗ Failed to register tool {tool_name}: {e}")
                 print(f"  Traceback: {traceback.format_exc()}")
         
-        print(f"\n✓ Successfully registered {len([t for t in index.get('tools', []) if t.get('enabled', True)])} tools")
-        print(f"✓ Tool registry contains {len(TOOL_REGISTRY)} tools available for dynamic execution")
+        print(f"\n✓ Successfully loaded {len([t for t in index.get('tools', []) if t.get('enabled', True)])} tools to registry")
+        print(f"✓ Tool registry contains {len(TOOL_REGISTRY)} tools available for operate_robot")
         
     except Exception as e:
         print(f"✗ Failed to load tools from repository: {e}")
@@ -317,15 +315,15 @@ You are controlling a Reachy Mini robot. The robot has:
 - A camera for vision
 - Various gestures and emotion expressions
 
-Common tasks:
-1. Express emotions using express_emotion()
-2. Perform gestures using perform_gesture()
-3. Move head to specific poses using move_head()
-4. Control antennas independently using move_antennas()
-5. Look in directions using look_at_direction()
+All robot operations are accessed through the operate_robot() tool:
+1. Express emotions: operate_robot("express_emotion", {"emotion": "happy"})
+2. Perform gestures: operate_robot("perform_gesture", {"gesture": "greeting"})
+3. Move head: operate_robot("move_head", {"z": 10, "duration": 2.0})
+4. Control antennas: operate_robot("move_antennas", {"left": 30, "right": -30})
+5. Look in directions: operate_robot("look_at_direction", {"direction": "left"})
 
-Always check the robot state first with get_robot_state() before issuing commands.
-Remember to turn on the robot with turn_on_robot() before movement commands.
+Always check the robot state first with operate_robot("get_robot_state") before issuing commands.
+Remember to turn on the robot with operate_robot("turn_on_robot") before movement commands.
 """
 
 
@@ -335,11 +333,11 @@ def safety_prompt() -> str:
     return """
 Reachy Mini Safety Guidelines:
 
-1. Always check robot state before issuing movement commands
+1. Always check robot state before issuing movement commands using operate_robot("get_robot_state")
 2. Use appropriate durations (typically 1-3 seconds) for smooth movements
 3. Avoid extreme angles that might stress the motors
-4. Use stop_all_movements() in case of unexpected behavior
-5. Turn off the robot with turn_off_robot() when done
+4. Use operate_robot("stop_all_movements") in case of unexpected behavior
+5. Turn off the robot with operate_robot("turn_off_robot") when done
 6. Monitor health_status periodically during extended use
 
 Head Position Limits:
@@ -466,9 +464,11 @@ def initialize_server():
     # Register all tools from repository
     register_tools_from_repository()
     
-    # Register the operate_robot meta-tool AFTER all tools are loaded
+    # Register ONLY the operate_robot meta-tool as an MCP tool
+    # All other tools are loaded into the registry but not exposed as individual MCP tools
     mcp.tool()(operate_robot)
-    print("✓ Registered meta-tool: operate_robot")
+    print("✓ Registered MCP tool: operate_robot (meta-tool for all robot operations)")
+    print(f"✓ Individual tools are available via operate_robot but not as separate MCP tools")
     
     print("=" * 60)
     print("Server initialized and ready!")

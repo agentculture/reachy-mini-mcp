@@ -95,13 +95,15 @@ The MCP server will now be running and ready to accept connections from MCP clie
 
 ## Available MCP Tools
 
-### Meta-Tool: Dynamic Robot Control
+### Single Unified Tool: `operate_robot`
+
+This MCP server exposes **one MCP tool** that provides access to all robot control functionality:
 
 | Tool | Description |
 |------|-------------|
-| `operate_robot(tool_name, parameters)` | **Meta-tool** to dynamically execute any robot control tool by name. See all available tools below. |
+| `operate_robot(tool_name, parameters)` | **Meta-tool** to dynamically execute any robot control operation by name. |
 
-This powerful meta-tool allows you to call any of the robot control tools dynamically:
+This unified interface allows you to call any of the robot control operations dynamically:
 
 ```python
 # Example: Get robot state
@@ -116,123 +118,129 @@ operate_robot("move_head", {"z": 10, "duration": 2.0, "mm": True})
 
 **Note:** The tool name must match exactly. The correct tool is `get_robot_state`, not `get_robot_status`.
 
-### Basic State & Control
+### Available Robot Operations
 
-| Tool | Description |
-|------|-------------|
-| `get_robot_state()` | Get full robot state including all components |
-| `get_head_state()` | Get current head position and orientation |
-| `get_antennas_state()` | Get current antenna positions |
-| `get_camera_state()` | Get camera status |
-| `get_power_state()` | Check if robot is powered on/off |
-| `get_health_status()` | Get overall health status |
-| `turn_on_robot()` | Power on the robot |
-| `turn_off_robot()` | Power off the robot |
-| `stop_all_movements()` | Emergency stop all movements |
+All operations are accessible through the `operate_robot` tool. Here are all available operations:
 
-### Head Movement
+#### Basic State & Control
 
-| Tool | Description |
-|------|-------------|
-| `move_head(x, y, z, roll, pitch, yaw, duration)` | Move head to specific pose |
-| `reset_head()` | Return head to neutral position |
-| `nod_head(duration, angle)` | Make robot nod (yes gesture) |
-| `shake_head(duration, angle)` | Make robot shake head (no gesture) |
-| `tilt_head(direction, angle, duration)` | Tilt head left or right |
-| `look_at_direction(direction, duration)` | Look in a direction (up/down/left/right) |
+| Operation | Description |
+|-----------|-------------|
+| `get_robot_state` | Get full robot state including all components |
+| `get_head_state` | Get current head position and orientation |
+| `get_antennas_state` | Get current antenna positions |
+| `get_camera_state` | Get camera status |
+| `get_power_state` | Check if robot is powered on/off |
+| `get_health_status` | Get overall health status |
+| `turn_on_robot` | Power on the robot |
+| `turn_off_robot` | Power off the robot |
+| `stop_all_movements` | Emergency stop all movements |
 
-### Antenna Movement
+#### Head Movement
 
-| Tool | Description |
-|------|-------------|
-| `move_antennas(left, right, duration)` | Move antennas to specific positions |
-| `reset_antennas()` | Return antennas to neutral position |
+| Operation | Description |
+|-----------|-------------|
+| `move_head` | Move head to specific pose (params: x, y, z, roll, pitch, yaw, duration) |
+| `reset_head` | Return head to neutral position |
+| `nod_head` | Make robot nod (params: duration, angle) |
+| `shake_head` | Make robot shake head (params: duration, angle) |
+| `tilt_head` | Tilt head left or right (params: direction, angle, duration) |
+| `look_at_direction` | Look in a direction (params: direction - up/down/left/right, duration) |
 
-### Emotions & Gestures
+#### Antenna Movement
 
-| Tool | Description |
-|------|-------------|
-| `express_emotion(emotion)` | Express emotion: happy, sad, curious, surprised, confused |
-| `perform_gesture(gesture)` | Perform gesture: greeting, yes, no, thinking, celebration |
+| Operation | Description |
+|-----------|-------------|
+| `move_antennas` | Move antennas to specific positions (params: left, right, duration) |
+| `reset_antennas` | Return antennas to neutral position |
 
-### Camera
+#### Emotions & Gestures
 
-| Tool | Description |
-|------|-------------|
-| `get_camera_image()` | Capture image from camera |
-| `get_camera_state()` | Get camera status |
+| Operation | Description |
+|-----------|-------------|
+| `express_emotion` | Express emotion (params: emotion - happy/sad/curious/surprised/confused) |
+| `perform_gesture` | Perform gesture (params: gesture - greeting/yes/no/thinking/celebration) |
+
+#### Camera
+
+| Operation | Description |
+|-----------|-------------|
+| `get_camera_image` | Capture image from camera |
+| `get_camera_state` | Get camera status |
 
 ## Usage Examples
+
+All operations are called through the `operate_robot` tool. Here are some examples:
 
 ### Example 1: Basic Head Movement
 
 ```python
 # In your MCP client (e.g., Claude Desktop)
 # Move head up 10mm and tilt 15 degrees
-move_head(z=10, roll=15, duration=2.0)
+operate_robot("move_head", {"z": 10, "roll": 15, "duration": 2.0})
 
 # Return to neutral
-reset_head()
+operate_robot("reset_head")
 ```
 
 ### Example 2: Express Emotions
 
 ```python
 # Make the robot look happy
-express_emotion("happy")
+operate_robot("express_emotion", {"emotion": "happy"})
 
 # Make the robot look curious
-express_emotion("curious")
+operate_robot("express_emotion", {"emotion": "curious"})
 
 # Return to neutral
-express_emotion("neutral")
+operate_robot("express_emotion", {"emotion": "neutral"})
 ```
 
 ### Example 3: Perform Gestures
 
 ```python
 # Wave hello
-perform_gesture("greeting")
+operate_robot("perform_gesture", {"gesture": "greeting"})
 
 # Nod yes
-perform_gesture("yes")
+operate_robot("perform_gesture", {"gesture": "yes"})
 
 # Shake no
-perform_gesture("no")
+operate_robot("perform_gesture", {"gesture": "no"})
 ```
 
 ### Example 4: Complex Interaction
 
 ```python
 # Turn on the robot
-turn_on_robot()
+operate_robot("turn_on_robot")
 
 # Check state
-state = get_robot_state()
+state = operate_robot("get_robot_state")
 
 # Make robot look around
-look_at_direction("left", duration=1.5)
-look_at_direction("right", duration=1.5)
-look_at_direction("forward")
+operate_robot("look_at_direction", {"direction": "left", "duration": 1.5})
+operate_robot("look_at_direction", {"direction": "right", "duration": 1.5})
+operate_robot("look_at_direction", {"direction": "forward"})
 
 # Express surprise
-express_emotion("surprised")
+operate_robot("express_emotion", {"emotion": "surprised"})
 
 # Perform celebration
-perform_gesture("celebration")
+operate_robot("perform_gesture", {"gesture": "celebration"})
 
 # Turn off when done
-turn_off_robot()
+operate_robot("turn_off_robot")
 ```
 
 ### Example 5: Control Antennas
 
 ```python
 # Move antennas independently
-move_antennas(left=30, right=-30, duration=1.0)
+operate_robot("move_antennas", {"left": 30, "right": -30, "duration": 1.0})
 
 # Reset to neutral
-reset_antennas()
+operate_robot("reset_antennas")
 ```
 
 ## Using with Claude Desktop
