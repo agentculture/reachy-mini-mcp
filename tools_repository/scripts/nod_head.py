@@ -25,3 +25,4 @@ async def execute(make_request, create_head_pose, params):
     pose_neutral = create_head_pose()
     return await make_request("POST", "/api/move/goto", json_data={"head_pose": pose_neutral, "duration": duration})
 
+

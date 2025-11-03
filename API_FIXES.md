@@ -176,3 +176,4 @@ If you need camera functionality, you may need to:
 2. `test_connection.py` - Updated to test correct endpoints
 3. `API_FIXES.md` - This documentation file (new)
 
+

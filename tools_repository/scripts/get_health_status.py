@@ -8,3 +8,4 @@ async def execute(make_request, create_head_pose, params):
     """Execute the get_health_status tool."""
     return await make_request('GET', '/api/daemon/status')
 
+
