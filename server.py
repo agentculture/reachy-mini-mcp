@@ -285,15 +285,24 @@ You are controlling a Reachy Mini robot. The robot has:
 - A camera for vision
 - Various gestures and emotion expressions
 
-All robot operations are accessed through the operate_robot() tool:
-1. Express emotions: operate_robot("express_emotion", {"emotion": "happy"})
-2. Perform gestures: operate_robot("perform_gesture", {"gesture": "greeting"})
-3. Move head: operate_robot("move_head", {"z": 10, "duration": 2.0})
-4. Control antennas: operate_robot("move_antennas", {"left": 30, "right": -30})
-5. Look in directions: operate_robot("look_at_direction", {"direction": "left"})
+All robot operations are accessed through the operate_robot() tool, which supports both single commands and sequences:
 
-Always check the robot state first with operate_robot("get_robot_state") before issuing commands.
-Remember to turn on the robot with operate_robot("turn_on_robot") before movement commands.
+Single Commands:
+1. Express emotions: operate_robot(tool_name="express_emotion", parameters={"emotion": "happy"})
+2. Perform gestures: operate_robot(tool_name="perform_gesture", parameters={"gesture": "greeting"})
+3. Move head: operate_robot(tool_name="move_head", parameters={"z": 10, "duration": 2.0})
+4. Control antennas: operate_robot(tool_name="move_antennas", parameters={"left": 30, "right": -30})
+5. Look in directions: operate_robot(tool_name="look_at_direction", parameters={"direction": "left"})
+
+Command Sequences (execute multiple actions):
+operate_robot(commands=[
+    {"tool_name": "perform_gesture", "parameters": {"gesture": "greeting"}},
+    {"tool_name": "nod_head", "parameters": {"duration": 2.0, "angle": 15}},
+    {"tool_name": "move_antennas", "parameters": {"left": 30, "right": -30, "duration": 1.5}}
+])
+
+Always check the robot state first with operate_robot(tool_name="get_robot_state") before issuing commands.
+Remember to turn on the robot with operate_robot(tool_name="turn_on_robot") before movement commands.
 """
 
 
@@ -303,12 +312,13 @@ def safety_prompt() -> str:
     return """
 Reachy Mini Safety Guidelines:
 
-1. Always check robot state before issuing movement commands using operate_robot("get_robot_state")
+1. Always check robot state before issuing movement commands using operate_robot(tool_name="get_robot_state")
 2. Use appropriate durations (typically 1-3 seconds) for smooth movements
 3. Avoid extreme angles that might stress the motors
-4. Use operate_robot("stop_all_movements") in case of unexpected behavior
-5. Turn off the robot with operate_robot("turn_off_robot") when done
+4. Use operate_robot(tool_name="stop_all_movements") in case of unexpected behavior
+5. Turn off the robot with operate_robot(tool_name="turn_off_robot") when done
 6. Monitor health_status periodically during extended use
+7. When using command sequences, ensure movements have appropriate durations to complete before the next command
 
 Head Position Limits:
 - Position offsets: typically ±20mm on x/y/z
@@ -316,6 +326,12 @@ Head Position Limits:
 
 Antenna Limits:
 - Typical range: -45 to 45 degrees
+
+Command Sequences:
+- Commands in a sequence are executed sequentially
+- Each command waits for the previous one to complete
+- If a command fails, subsequent commands will still be attempted
+- Check the results array to see which commands succeeded or failed
 """
 
 
@@ -338,12 +354,16 @@ def get_tool_registry() -> Dict[str, Any]:
 
 # Meta-tool for operating the robot dynamically
 # Note: This is registered manually in initialize_server() after all tools are loaded
-async def operate_robot(tool_name: str, parameters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+async def operate_robot(
+    tool_name: Optional[str] = None, 
+    parameters: Optional[Dict[str, Any]] = None,
+    commands: Optional[List[Dict[str, Any]]] = None
+) -> Dict[str, Any]:
     """
-    Execute any robot control tool dynamically based on tools_index.json.
+    Execute robot control tool(s) dynamically based on tools_index.json.
     
     This is a meta-tool that allows you to call any of the available robot control tools
-    by specifying the tool name and parameters.
+    either as a single command or as a sequence of commands.
     
     Available tools (from tools_index.json):
     - get_robot_state: Get full robot state including all components
@@ -366,56 +386,150 @@ async def operate_robot(tool_name: str, parameters: Optional[Dict[str, Any]] = N
     - get_health_status: Get overall health status
     
     Args:
-        tool_name: Name of the tool to execute (from the list above)
-        parameters: Dictionary of parameters to pass to the tool (optional)
+        tool_name: Name of the tool to execute (for single command mode)
+        parameters: Dictionary of parameters to pass to the tool (for single command mode)
+        commands: List of command dictionaries for sequence mode. Each dict should have:
+                  - "tool_name": Name of the tool to execute
+                  - "parameters": Dictionary of parameters (optional)
     
     Returns:
-        Result from the executed tool
+        For single command: Result from the executed tool
+        For sequence: Dictionary with results from all commands
         
     Examples:
-        # Express happiness
-        operate_robot("express_emotion", {"emotion": "happy"})
+        # Single command - Express happiness
+        operate_robot(tool_name="express_emotion", parameters={"emotion": "happy"})
         
-        # Move head up
-        operate_robot("move_head", {"z": 10, "duration": 2.0})
+        # Single command - Move head up
+        operate_robot(tool_name="move_head", parameters={"z": 10, "duration": 2.0})
         
-        # Get robot state
-        operate_robot("get_robot_state")
+        # Single command - Get robot state
+        operate_robot(tool_name="get_robot_state")
         
-        # Perform greeting gesture
-        operate_robot("perform_gesture", {"gesture": "greeting"})
+        # Sequence of commands
+        operate_robot(commands=[
+            {"tool_name": "perform_gesture", "parameters": {"gesture": "greeting"}},
+            {"tool_name": "nod_head", "parameters": {"duration": 2.0, "angle": 15}},
+            {"tool_name": "move_antennas", "parameters": {"left": 30, "right": -30, "duration": 1.5}},
+            {"tool_name": "look_at_direction", "parameters": {"direction": "left", "duration": 1.0}}
+        ])
     """
-    if parameters is None:
-        parameters = {}
-    
     # Get the current tool registry
     registry = get_tool_registry()
     
-    # Check if tool exists in registry
-    if tool_name not in registry:
-        available_tools = ", ".join(sorted(registry.keys()))
+    # Determine mode: sequence or single command
+    if commands is not None:
+        # Sequence mode
+        if not isinstance(commands, list):
+            return {
+                "error": "commands parameter must be a list of command dictionaries",
+                "status": "failed"
+            }
+        
+        results = []
+        failed_count = 0
+        
+        for idx, command in enumerate(commands):
+            if not isinstance(command, dict):
+                results.append({
+                    "command_index": idx,
+                    "error": "Each command must be a dictionary",
+                    "status": "failed"
+                })
+                failed_count += 1
+                continue
+            
+            cmd_tool_name = command.get("tool_name")
+            cmd_parameters = command.get("parameters", {})
+            
+            if not cmd_tool_name:
+                results.append({
+                    "command_index": idx,
+                    "error": "Missing 'tool_name' in command",
+                    "status": "failed"
+                })
+                failed_count += 1
+                continue
+            
+            # Check if tool exists
+            if cmd_tool_name not in registry:
+                available_tools = ", ".join(sorted(registry.keys()))
+                results.append({
+                    "command_index": idx,
+                    "tool_name": cmd_tool_name,
+                    "error": f"Tool '{cmd_tool_name}' not found",
+                    "available_tools": available_tools,
+                    "status": "failed"
+                })
+                failed_count += 1
+                continue
+            
+            # Execute the command
+            try:
+                tool_func = registry[cmd_tool_name]
+                result = await tool_func(**cmd_parameters)
+                results.append({
+                    "command_index": idx,
+                    "tool": cmd_tool_name,
+                    "parameters": cmd_parameters,
+                    "result": result,
+                    "status": "success"
+                })
+            except Exception as e:
+                results.append({
+                    "command_index": idx,
+                    "tool": cmd_tool_name,
+                    "parameters": cmd_parameters,
+                    "error": str(e),
+                    "status": "failed"
+                })
+                failed_count += 1
+        
         return {
-            "error": f"Tool '{tool_name}' not found",
-            "available_tools": available_tools,
-            "registry_size": len(registry),
-            "status": "failed"
+            "mode": "sequence",
+            "total_commands": len(commands),
+            "successful": len(commands) - failed_count,
+            "failed": failed_count,
+            "results": results,
+            "status": "success" if failed_count == 0 else "partial" if failed_count < len(commands) else "failed"
         }
     
-    try:
-        # Execute the tool
-        tool_func = registry[tool_name]
-        result = await tool_func(**parameters)
+    elif tool_name is not None:
+        # Single command mode (backward compatible)
+        if parameters is None:
+            parameters = {}
+        
+        # Check if tool exists in registry
+        if tool_name not in registry:
+            available_tools = ", ".join(sorted(registry.keys()))
+            return {
+                "error": f"Tool '{tool_name}' not found",
+                "available_tools": available_tools,
+                "registry_size": len(registry),
+                "status": "failed"
+            }
+        
+        try:
+            # Execute the tool
+            tool_func = registry[tool_name]
+            result = await tool_func(**parameters)
+            return {
+                "tool": tool_name,
+                "parameters": parameters,
+                "result": result,
+                "status": "success"
+            }
+        except Exception as e:
+            return {
+                "tool": tool_name,
+                "parameters": parameters,
+                "error": str(e),
+                "status": "failed"
+            }
+    
+    else:
         return {
-            "tool": tool_name,
-            "parameters": parameters,
-            "result": result,
-            "status": "success"
-        }
-    except Exception as e:
-        return {
-            "tool": tool_name,
-            "parameters": parameters,
-            "error": str(e),
+            "error": "Must provide either 'tool_name' for single command or 'commands' for sequence",
             "status": "failed"
         }
 

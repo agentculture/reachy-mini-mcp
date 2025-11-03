@@ -23,6 +23,11 @@ This MCP server provides a comprehensive set of tools to control Reachy Mini's h
 - **Camera Access**: Capture images from the robot's camera
 - **Camera State**: Monitor camera status and settings
 
+### Advanced Features
+- **Command Sequences**: Execute multiple robot operations in a single call (NEW!)
+- **Single Unified Interface**: Access all functionality through one `operate_robot` tool
+- **Repository-Based Tools**: Easily extensible tool system with JSON definitions
+
 ## Prerequisites
 
 1. **Python 3.10+** (tested with Python 3.10-3.13)
@@ -102,9 +107,11 @@ This MCP server exposes **one MCP tool** that provides access to all robot contr
 | Tool | Description |
 |------|-------------|
 | `operate_robot(tool_name, parameters)` | **Meta-tool** to dynamically execute any robot control operation by name. |
+| `operate_robot(commands)` | **Sequence mode** to execute multiple operations in sequence. |
 
-This unified interface allows you to call any of the robot control operations dynamically:
+This unified interface allows you to call any of the robot control operations either individually or as a sequence:
 
+**Single Command Mode:**
 ```python
 # Example: Get robot state
 operate_robot("get_robot_state")
@@ -114,6 +121,17 @@ operate_robot("express_emotion", {"emotion": "happy"})
 
 # Example: Move head with multiple parameters
 operate_robot("move_head", {"z": 10, "duration": 2.0, "mm": True})
+```
+
+**Sequence Mode (NEW!):**
+```python
+# Example: Execute multiple commands in sequence
+operate_robot(commands=[
+    {"tool_name": "perform_gesture", "parameters": {"gesture": "greeting"}},
+    {"tool_name": "nod_head", "parameters": {"duration": 2.0, "angle": 15}},
+    {"tool_name": "move_antennas", "parameters": {"left": 30, "right": -30, "duration": 1.5}},
+    {"tool_name": "look_at_direction", "parameters": {"direction": "left", "duration": 1.0}}
+])
 ```
 
 **Note:** The tool name must match exactly. The correct tool is `get_robot_state`, not `get_robot_status`.
@@ -242,6 +260,39 @@ operate_robot("move_antennas", {"left": 30, "right": -30, "duration": 1.0})
 # Reset to neutral
 operate_robot("reset_antennas")
 ```
+
+### Example 6: Command Sequences (NEW!)
+
+Execute complex robot behaviors with command sequences:
+
+```python
+# Greeting sequence
+operate_robot(commands=[
+    {"tool_name": "express_emotion", "parameters": {"emotion": "happy"}},
+    {"tool_name": "perform_gesture", "parameters": {"gesture": "greeting"}},
+    {"tool_name": "nod_head", "parameters": {"duration": 1.5, "angle": 10}},
+    {"tool_name": "reset_head", "parameters": {}}
+])
+
+# Curious behavior - look around
+operate_robot(commands=[
+    {"tool_name": "express_emotion", "parameters": {"emotion": "curious"}},
+    {"tool_name": "move_antennas", "parameters": {"left": 30, "right": 30, "duration": 1.0}},
+    {"tool_name": "look_at_direction", "parameters": {"direction": "left", "duration": 1.0}},
+    {"tool_name": "look_at_direction", "parameters": {"direction": "right", "duration": 1.0}},
+    {"tool_name": "look_at_direction", "parameters": {"direction": "forward", "duration": 0.5}}
+])
+
+# Initialization routine
+operate_robot(commands=[
+    {"tool_name": "turn_on_robot", "parameters": {}},
+    {"tool_name": "reset_head", "parameters": {}},
+    {"tool_name": "reset_antennas", "parameters": {}},
+    {"tool_name": "get_robot_state", "parameters": {}}
+])
+```
+
+For more details on command sequences, see [SEQUENCE_COMMANDS.md](SEQUENCE_COMMANDS.md).
 
 ## Using with Claude Desktop
 
