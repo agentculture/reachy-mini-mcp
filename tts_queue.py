@@ -23,6 +23,10 @@ from typing import Optional, List
 import threading
 from queue import Queue, Empty
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file if available
+load_dotenv()
 
 
 class TTSQueue:
@@ -267,15 +271,20 @@ class TTSQueue:
     def enqueue_text(self, text: str):
         """
         Extract quoted text and enqueue for TTS playback.
+        If no quotes are found, treat the entire text as speech.
         
         Args:
-            text: Text that may contain quoted segments to vocalize
+            text: Text that may contain quoted segments to vocalize, or plain text
         """
         # Extract quoted segments
         quoted_texts = self.extract_quoted_text(text)
         
+        # If no quoted text found, use the entire text as-is
         if not quoted_texts:
-            return
+            if text.strip():
+                quoted_texts = [text.strip()]
+            else:
+                return
         
         print(f"🔊 Enqueueing {len(quoted_texts)} TTS segment(s)...")
         

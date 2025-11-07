@@ -17,8 +17,12 @@ import asyncio
 import importlib.util
 from pathlib import Path
 from typing import Optional, Dict, Any, List
+from dotenv import load_dotenv
 from fastmcp import FastMCP
 from tts_queue import AsyncTTSQueue
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Initialize FastMCP server
 mcp = FastMCP("Reachy Mini Controller")
