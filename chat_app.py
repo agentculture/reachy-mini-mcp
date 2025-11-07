@@ -34,10 +34,12 @@ import asyncio
 import httpx
 import json
 import sys
+import os
 from pathlib import Path
 from typing import List, Dict, Any
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from tts_queue import AsyncTTSQueue
 
 
 # Configuration
@@ -59,6 +61,7 @@ class InteractiveChatApp:
         self.stdio_context = None
         self.mcp_tools = []
         self.messages = []
+        self.tts_queue = None  # TTS queue for vocalizing quoted text
         self.system_prompt = (
             "You are a robot controller. Your SOLE purpose is to call functions.\n"
             "DO NOT provide conversation, explanation, or any text. DO NOT talk about the actions.\n"
@@ -77,6 +80,30 @@ class InteractiveChatApp:
         print("=" * 70)
         print("Initializing MCP Client")
         print("=" * 70)
+        
+        # Initialize TTS queue
+        print("\n🔊 Initializing TTS Queue...")
+        try:
+            # Get model from environment variable
+            piper_model = os.environ.get("PIPER_MODEL")
+            if piper_model:
+                print(f"   Using model: {piper_model}")
+            
+            # Get audio device from environment variable or use reSpeaker default
+            audio_device = os.environ.get("AUDIO_DEVICE", "plughw:CARD=Array,DEV=0")
+            print(f"   Using audio device: {audio_device}")
+            
+            self.tts_queue = AsyncTTSQueue(voice_model=piper_model, audio_device=audio_device)
+            print("   ✓ TTS Queue initialized")
+        except ValueError as e:
+            print(f"   ⚠️  TTS Queue not initialized: {e}")
+            print("   ℹ️  To enable TTS, set PIPER_MODEL environment variable")
+            print("   ℹ️  Or run: ./setup_piper_model.sh")
+            self.tts_queue = None
+        except Exception as e:
+            print(f"   ⚠️  TTS Queue initialization warning: {e}")
+            print("   ⚠️  Continuing without TTS support")
+            self.tts_queue = None
         
         # Load mcp.json configuration
         mcp_config_path = Path(__file__).parent / "mcp.json"
@@ -307,6 +334,10 @@ class InteractiveChatApp:
     
     async def process_message(self, user_message: str) -> str:
         """Process a user message and return the assistant's response."""
+        # Clear TTS queue when user sends new message
+        if self.tts_queue:
+            await self.tts_queue.clear_queue()
+        
         # Add user message to conversation
         self.messages.append({"role": "user", "content": user_message})
        
@@ -492,6 +523,10 @@ class InteractiveChatApp:
             # If we get here with a different finish reason, something unexpected happened
             break
         
+        # Enqueue any quoted text for TTS
+        if final_response and self.tts_queue:
+            await self.tts_queue.enqueue_text(final_response)
+        
         return final_response or "(No response generated)"
     
     def print_help(self):
@@ -608,6 +643,12 @@ class InteractiveChatApp:
     async def cleanup(self):
         """Cleanup MCP session."""
         print("\n🧹 Cleaning up...")
+        
+        # Cleanup TTS queue
+        if self.tts_queue:
+            self.tts_queue.cleanup()
+            print("   ✓ TTS Queue cleaned up")
+        
         if self.client_context:
             await self.client_context.__aexit__(None, None, None)
         if self.stdio_context:

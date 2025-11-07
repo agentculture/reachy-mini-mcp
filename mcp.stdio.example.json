@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "reachy-mini": {
+      "command": "python",
+      "args": ["/home/thor/git/reachy-mini-mcp/server.py"],
+      "env": {
+        "PYTHONPATH": "/home/thor/git/reachy-mini-mcp:/home/thor/git/reachy-mini-mcp/.venv/lib/python3.12/site-packages"
+      }
+    }
+  }
+}
