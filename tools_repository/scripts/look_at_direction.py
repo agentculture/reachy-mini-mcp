@@ -4,9 +4,14 @@ Makes the robot look in a specific direction.
 """
 
 
-async def execute(make_request, create_head_pose, params):
+async def execute(make_request, create_head_pose, tts_queue, params):
     """Execute the look_at_direction tool."""
     direction = params.get('direction', 'forward').lower()
+    speech = params.get('speech')
+    
+    # Handle speech if provided
+    if speech and tts_queue:
+        await tts_queue.enqueue_text(speech)
     
     if direction == 'up':
         pose = create_head_pose(pitch=-30, degrees=True)

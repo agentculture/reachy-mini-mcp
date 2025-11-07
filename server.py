@@ -18,6 +18,7 @@ import importlib.util
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from fastmcp import FastMCP
+from tts_queue import AsyncTTSQueue
 
 # Initialize FastMCP server
 mcp = FastMCP("Reachy Mini Controller")
@@ -25,6 +26,9 @@ mcp = FastMCP("Reachy Mini Controller")
 # Configuration
 REACHY_BASE_URL = "http://localhost:8000"
 TOOLS_REPOSITORY_PATH = Path(__file__).parent / "tools_repository"
+
+# TTS Queue (initialized in initialize_server)
+tts_queue = None
 
 
 # Helper functions
@@ -184,7 +188,7 @@ def create_tool_function(tool_def: Dict[str, Any]):
         
         async def tool_func_impl(*args, **kwargs):
             # Call the execute function from the script
-            return await module.execute(make_request, create_head_pose, kwargs)
+            return await module.execute(make_request, create_head_pose, tts_queue, kwargs)
         
         # Create a new function with the proper signature and annotations
         tool_func_impl.__signature__ = inspect.Signature(params)
@@ -368,22 +372,26 @@ async def operate_robot(
     Available tools (from tools_index.json):
     - get_robot_state: Get full robot state including all components
     - get_head_state: Get current head position and orientation
-    - move_head: Move head to specific pose (params: x, y, z, roll, pitch, yaw, duration)
-    - reset_head: Return head to neutral position
-    - nod_head: Make robot nod (params: duration, angle)
-    - shake_head: Make robot shake head (params: duration, angle)
-    - tilt_head: Tilt head left or right (params: direction, angle, duration)
+    - move_head: Move head to specific pose (params: x, y, z, roll, pitch, yaw, duration, speech)
+    - reset_head: Return head to neutral position (params: speech)
+    - nod_head: Make robot nod (params: duration, angle, speech)
+    - shake_head: Make robot shake head (params: duration, angle, speech)
+    - tilt_head: Tilt head left or right (params: direction, angle, duration, speech)
     - get_antennas_state: Get current antenna positions
-    - move_antennas: Move antennas to specific positions (params: left, right, duration)
-    - reset_antennas: Return antennas to neutral position
-    - turn_on_robot: Power on the robot
-    - turn_off_robot: Power off the robot
+    - move_antennas: Move antennas to specific positions (params: left, right, duration, speech)
+    - reset_antennas: Return antennas to neutral position (params: speech)
+    - turn_on_robot: Power on the robot (params: speech)
+    - turn_off_robot: Power off the robot (params: speech)
     - get_power_state: Check if robot is powered on/off
-    - stop_all_movements: Emergency stop all movements
-    - express_emotion: Express emotion (params: emotion - happy/sad/curious/surprised/confused)
-    - look_at_direction: Look in a direction (params: direction - up/down/left/right/forward, duration)
-    - perform_gesture: Perform gesture (params: gesture - greeting/yes/no/thinking/celebration)
+    - stop_all_movements: Emergency stop all movements (params: speech)
+    - express_emotion: Express emotion (params: emotion - happy/sad/curious/surprised/confused, speech)
+    - look_at_direction: Look in a direction (params: direction - up/down/left/right/forward, duration, speech)
+    - perform_gesture: Perform gesture (params: gesture - greeting/yes/no/thinking/celebration, speech)
     - get_health_status: Get overall health status
+    
+    Speech Parameter:
+    Most action commands support an optional 'speech' parameter. When provided, the robot will
+    speak the text using text-to-speech (TTS) while performing the action.
     
     Args:
         tool_name: Name of the tool to execute (for single command mode)
@@ -397,19 +405,19 @@ async def operate_robot(
         For sequence: Dictionary with results from all commands
         
     Examples:
-        # Single command - Express happiness
-        operate_robot(tool_name="express_emotion", parameters={"emotion": "happy"})
+        # Single command - Express happiness with speech
+        operate_robot(tool_name="express_emotion", parameters={"emotion": "happy", "speech": "Hello! I'm so happy to see you!"})
         
-        # Single command - Move head up
-        operate_robot(tool_name="move_head", parameters={"z": 10, "duration": 2.0})
+        # Single command - Move head up with speech
+        operate_robot(tool_name="move_head", parameters={"z": 10, "duration": 2.0, "speech": "Looking up!"})
         
         # Single command - Get robot state
         operate_robot(tool_name="get_robot_state")
         
-        # Sequence of commands
+        # Sequence of commands with speech
         operate_robot(commands=[
-            {"tool_name": "perform_gesture", "parameters": {"gesture": "greeting"}},
-            {"tool_name": "nod_head", "parameters": {"duration": 2.0, "angle": 15}},
+            {"tool_name": "perform_gesture", "parameters": {"gesture": "greeting", "speech": "Hello there!"}},
+            {"tool_name": "nod_head", "parameters": {"duration": 2.0, "angle": 15, "speech": "Yes, I understand"}},
             {"tool_name": "move_antennas", "parameters": {"left": 30, "right": -30, "duration": 1.5}},
             {"tool_name": "look_at_direction", "parameters": {"direction": "left", "duration": 1.0}}
         ])
@@ -538,12 +546,25 @@ async def operate_robot(
 
 def initialize_server():
     """Initialize the server by loading all tools from the repository."""
+    global tts_queue
+    
     print("=" * 60)
     print("Reachy Mini MCP Server - Repository-Based Tool Loading")
     print("=" * 60)
     print(f"Tools repository path: {TOOLS_REPOSITORY_PATH}")
     print(f"Reachy daemon URL: {REACHY_BASE_URL}")
     print("-" * 60)
+    
+    # Initialize TTS queue
+    try:
+        model_path = os.environ.get("PIPER_MODEL")
+        audio_device = os.environ.get("AUDIO_DEVICE", "sysdefault")
+        tts_queue = AsyncTTSQueue(voice_model=model_path, audio_device=audio_device)
+        print("✓ TTS queue initialized")
+    except Exception as e:
+        print(f"⚠️  TTS queue initialization failed: {e}")
+        print("   Speech parameter will be ignored in commands")
+        tts_queue = None
     
     # Register all tools from repository
     register_tools_from_repository()

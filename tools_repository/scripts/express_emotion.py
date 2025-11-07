@@ -2,16 +2,22 @@
 import math
 
 
-async def execute(make_request, create_head_pose, params):
+async def execute(make_request, create_head_pose, tts_queue, params):
     """
     Make the robot express an emotion using head and antenna movements.
     
     Args:
         make_request: Function to make HTTP requests
         create_head_pose: Function to create head pose
+        tts_queue: TTS queue for speech synthesis
         params: Dictionary with emotion parameter
     """
     emotion = params.get('emotion', 'neutral').lower()
+    speech = params.get('speech')
+    
+    # Handle speech if provided
+    if speech and tts_queue:
+        await tts_queue.enqueue_text(speech)
     
     if emotion == "happy":
         # Lift head slightly and antennas up

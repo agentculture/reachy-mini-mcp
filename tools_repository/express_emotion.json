@@ -9,7 +9,14 @@
         "description": "One of: 'happy', 'sad', 'curious', 'surprised', 'confused', 'neutral'"
       }
     ],
-    "optional": []
+    "optional": [
+      {
+        "name": "speech",
+        "type": "string",
+        "default": null,
+        "description": "Optional text to speak via TTS while performing the emotion"
+      }
+    ]
   },
   "execution": {
     "type": "script",

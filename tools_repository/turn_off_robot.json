@@ -3,7 +3,14 @@
   "description": "Turn off the robot's motors and deactivate systems.\n\nThis powers down the robot safely. Use this when done controlling the robot.",
   "parameters": {
     "required": [],
-    "optional": []
+    "optional": [
+      {
+        "name": "speech",
+        "type": "string",
+        "default": null,
+        "description": "Optional text to speak via TTS before turning off robot"
+      }
+    ]
   },
   "execution": {
     "type": "script",

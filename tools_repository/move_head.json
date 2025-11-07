@@ -57,6 +57,12 @@
         "type": "boolean",
         "default": true,
         "description": "If True (default), positions are in millimeters"
+      },
+      {
+        "name": "speech",
+        "type": "string",
+        "default": null,
+        "description": "Optional text to speak via TTS while moving the head"
       }
     ]
   },

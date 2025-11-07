@@ -15,6 +15,12 @@
         "type": "number",
         "default": 2.0,
         "description": "Duration of the movement in seconds"
+      },
+      {
+        "name": "speech",
+        "type": "string",
+        "default": null,
+        "description": "Optional text to speak via TTS while looking in direction"
       }
     ]
   },

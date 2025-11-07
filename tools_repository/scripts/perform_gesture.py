@@ -3,16 +3,22 @@ import asyncio
 import math
 
 
-async def execute(make_request, create_head_pose, params):
+async def execute(make_request, create_head_pose, tts_queue, params):
     """
     Perform a predefined gesture sequence.
     
     Args:
         make_request: Function to make HTTP requests
         create_head_pose: Function to create head pose
+        tts_queue: TTS queue for speech synthesis
         params: Dictionary with gesture parameter
     """
     gesture = params.get('gesture', '').lower()
+    speech = params.get('speech')
+    
+    # Handle speech if provided
+    if speech and tts_queue:
+        await tts_queue.enqueue_text(speech)
     
     if gesture == "greeting":
         # Wave with head and antennas - call nod_head logic

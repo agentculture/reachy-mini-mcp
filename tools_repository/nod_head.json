@@ -15,6 +15,12 @@
         "type": "number",
         "default": 15.0,
         "description": "Angle to pitch in degrees (default 15 degrees)"
+      },
+      {
+        "name": "speech",
+        "type": "string",
+        "default": null,
+        "description": "Optional text to speak via TTS while nodding"
       }
     ]
   },
