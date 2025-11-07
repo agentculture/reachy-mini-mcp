@@ -370,9 +370,10 @@ async def test_tts():
     
     # Get model from environment or use default search
     model_path = os.environ.get("PIPER_MODEL")
+    audio_device = os.environ.get("AUDIO_DEVICE", "sysdefault")
     
     try:
-        tts = AsyncTTSQueue(voice_model=model_path)
+        tts = AsyncTTSQueue(voice_model=model_path, audio_device=audio_device)
     except ValueError as e:
         print(f"\n❌ Error: {e}")
         print("\nTo test TTS, either:")

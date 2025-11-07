@@ -12,8 +12,8 @@ async def main():
     print("Simple TTS Test")
     print("=" * 70)
     
-    # Initialize TTS with auto-detected model
-    tts = AsyncTTSQueue()
+    # Initialize TTS with auto-detected model and sysdefault device
+    tts = AsyncTTSQueue(audio_device="sysdefault")
     
     # Test 1: Single quoted text
     print("\nTest 1: Single quoted text")

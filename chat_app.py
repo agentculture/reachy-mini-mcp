@@ -89,8 +89,8 @@ class InteractiveChatApp:
             if piper_model:
                 print(f"   Using model: {piper_model}")
             
-            # Get audio device from environment variable or use reSpeaker default
-            audio_device = os.environ.get("AUDIO_DEVICE", "plughw:CARD=Array,DEV=0")
+            # Get audio device from environment variable or use sysdefault (bypasses daemon conflicts)
+            audio_device = os.environ.get("AUDIO_DEVICE", "sysdefault")
             print(f"   Using audio device: {audio_device}")
             
             self.tts_queue = AsyncTTSQueue(voice_model=piper_model, audio_device=audio_device)
