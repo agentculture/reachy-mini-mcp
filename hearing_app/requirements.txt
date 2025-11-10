@@ -1,0 +1,14 @@
+# Requirements for Reachy Hearing Event Emitter
+# Standard library only - no external dependencies needed
+# The emitter uses only:
+# - socket (Unix Domain Sockets)
+# - json (Event serialization)
+# - threading (Client connection handling)
+# - datetime (Timestamps)
+
+# If you need to add actual audio processing, consider:
+# numpy>=1.24.0
+# pyaudio>=0.2.13
+# scipy>=1.10.0
+# librosa>=0.10.0
+# whisper>=1.0.0
