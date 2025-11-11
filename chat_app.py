@@ -253,18 +253,66 @@ class InteractiveChatApp:
             print(f"   ✗ {error_msg}")
             return {"error": error_msg}
     
+    def _prepare_messages_for_api(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Prepare messages for API call by cleaning up problematic sequences.
+        
+        vLLM has issues with:
+        - Empty tool_calls arrays
+        - Orphaned tool messages (tool messages without preceding tool_calls)
+        
+        This function ensures the message sequence is valid for vLLM.
+        """
+        cleaned_messages = []
+        last_assistant_had_tool_calls = False
+        
+        for msg in messages:
+            role = msg.get("role")
+            msg_copy = msg.copy()
+            
+            if role == "assistant":
+                # Track if this assistant message has tool calls
+                has_tool_calls = bool(msg.get("tool_calls"))
+                last_assistant_had_tool_calls = has_tool_calls
+                
+                # Remove empty tool_calls array
+                if "tool_calls" in msg_copy and not msg_copy["tool_calls"]:
+                    del msg_copy["tool_calls"]
+                
+                cleaned_messages.append(msg_copy)
+                
+            elif role == "tool":
+                # Only include tool messages if the last assistant had tool_calls
+                if last_assistant_had_tool_calls:
+                    cleaned_messages.append(msg_copy)
+                else:
+                    # Skip orphaned tool message
+                    print(f"   [DEBUG] Skipping orphaned tool message: {msg.get('name')}")
+                    
+            else:
+                # system, user, etc - include as-is
+                cleaned_messages.append(msg_copy)
+                # Reset tool call tracking on new user message
+                if role == "user":
+                    last_assistant_had_tool_calls = False
+        
+        return cleaned_messages
+    
     async def chat_completion(
         self,
         messages: List[Dict[str, Any]],
         tools: List[Dict[str, Any]] = None,
-        max_tokens: int = 500
+        max_tokens: int = 1000
     ) -> Dict[str, Any]:
         """Make a chat completion request with pythonic tool calling support."""
+        # Clean up messages before sending to API
+        cleaned_messages = self._prepare_messages_for_api(messages)
+        
         payload = {
             "model": MODEL_NAME,
-            "messages": messages,
+            "messages": cleaned_messages,
             "max_tokens": max_tokens,
-            "temperature": 0.1  # Lower temperature for more consistent tool calling
+            "temperature": 0.3  # Lower temperature for more consistent tool calling
         }
         
         if tools:
@@ -282,7 +330,7 @@ class InteractiveChatApp:
             except httpx.HTTPStatusError as e:
                 print(f"\n❌ Error calling model: {e}")
                 print(f"\n📋 Request payload (last 3 messages):")
-                for msg in messages[-3:]:
+                for msg in cleaned_messages[-3:]:
                     print(f"   Role: {msg.get('role')}")
                     if msg.get('content'):
                         print(f"   Content: {msg['content'][:100]}...")
@@ -354,6 +402,11 @@ class InteractiveChatApp:
             else:
                 print(f"  tool_calls is empty or None")
             
+            # Clean up empty tool_calls array before adding to conversation
+            # vLLM expects clean message format - empty arrays cause issues
+            if "tool_calls" in assistant_message and not assistant_message["tool_calls"]:
+                del assistant_message["tool_calls"]
+            
             # Add assistant message to conversation
             self.messages.append(assistant_message)
             
@@ -403,10 +456,23 @@ class InteractiveChatApp:
                 final_response = None
                 # Don't break here - continue to tool call processing below
             elif final_response:
-                # Only text content, no tool calls - this is a normal text response
+                # Only text content, no tool calls - check if this is after tool execution
                 if finish_reason == "stop":
-                    # Normal text response, we're done
-                    break
+                    # Check if the previous messages contain tool results
+                    # If so, this is the final response after tool chain completion
+                    has_recent_tool_results = False
+                    for msg in reversed(self.messages[-5:]):  # Check last 5 messages
+                        if msg.get("role") == "tool":
+                            has_recent_tool_results = True
+                            break
+                    
+                    if has_recent_tool_results:
+                        # This is the final response after tool execution - we're done with this chain
+                        print(f"\n✓ Model provided final response after tool execution")
+                        break
+                    else:
+                        # Just a normal text response, we're done
+                        break
             elif finish_reason == "stop":
                 # No content and no tool calls, we're done
                 break
@@ -458,27 +524,8 @@ class InteractiveChatApp:
                     })
                 
                 # Continue conversation with tool results
-                # Handle tool calls (both with finish_reason "tool_calls" or "stop")
-            if "tool_calls" in assistant_message and assistant_message["tool_calls"]:
-                tool_calls = assistant_message["tool_calls"]
-                
-                print(f"\n🔧 Processing {len(tool_calls)} tool call(s) (pythonic format)...")
-                
-                # Execute each tool call
-                for tool_call in tool_calls:
-                    # ... (tool execution logic) ...
-                    
-                    # Add tool result to conversation
-                    self.messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call_id,
-                        "name": tool_name,
-                        "content": tool_result_content
-                    })
-                
-                # We have executed the tool. Stop iterating.
-                # The robot's job is one command -> one action.
-                break  # <-- CHANGE THIS LINE FROM 'continue'
+                # Allow the model to respond to the tool results and potentially chain more commands
+                continue  
             
             # If we get here with a different finish reason, something unexpected happened
             break
