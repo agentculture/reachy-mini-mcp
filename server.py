@@ -497,6 +497,29 @@ async def operate_robot(
                 })
                 failed_count += 1
         
+        # Automatically append get_robot_state at the end
+        try:
+            if "get_robot_state" in registry:
+                tool_func = registry["get_robot_state"]
+                state_result = await tool_func()
+                results.append({
+                    "command_index": len(commands),
+                    "tool": "get_robot_state",
+                    "parameters": {},
+                    "result": state_result,
+                    "status": "success",
+                    "auto_appended": True
+                })
+        except Exception as e:
+            results.append({
+                "command_index": len(commands),
+                "tool": "get_robot_state",
+                "parameters": {},
+                "error": str(e),
+                "status": "failed",
+                "auto_appended": True
+            })
+        
         return {
             "mode": "sequence",
             "total_commands": len(commands),
@@ -525,10 +548,21 @@ async def operate_robot(
             # Execute the tool
             tool_func = registry[tool_name]
             result = await tool_func(**parameters)
+            
+            # Automatically get robot state after execution (unless already getting state)
+            robot_state = None
+            if tool_name != "get_robot_state" and "get_robot_state" in registry:
+                try:
+                    state_func = registry["get_robot_state"]
+                    robot_state = await state_func()
+                except Exception as state_error:
+                    robot_state = {"error": str(state_error)}
+            
             return {
                 "tool": tool_name,
                 "parameters": parameters,
                 "result": result,
+                "robot_state": robot_state,
                 "status": "success"
             }
         except Exception as e:
