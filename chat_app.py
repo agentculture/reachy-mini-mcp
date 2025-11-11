@@ -45,9 +45,10 @@ from mcp.client.stdio import stdio_client
 CHAT_COMPLETIONS_URL = "http://localhost:8100/v1/chat/completions"
 # The model name can be anything when using vLLM - it just needs to be non-empty
 # vLLM will use whatever model it's serving
-MODEL_NAME = "meta-llama/Llama-3.2-3B-Instruct"  # Adjust based on your vLLM setup
+#MODEL_NAME = "meta-llama/Llama-3.2-3B-Instruct"  # Adjust based on your vLLM setup
 #MODEL_NAME = "meta-llama/Llama-3.1-8B-Instruct"
 #MODEL_NAME = "meta-llama/Llama-3.2-11B-Vision-Instruct"  # Adjust based on your vLLM setup
+MODEL_NAME = "RedHatAI/Llama-3.2-3B-Instruct-FP8"
 
 class InteractiveChatApp:
     """Interactive chat application with MCP tool integration."""
@@ -770,14 +771,8 @@ class InteractiveChatApp:
                         continue
                 
                 # Process the message
-                print("\n🤖 Assistant: ", end="", flush=True)
                 response = await self.process_message(user_input)
-                
-                # Print response with simulated streaming effect
-                for char in response:
-                    print(char, end="", flush=True)
-                    await asyncio.sleep(0.01)  # Small delay for effect
-                print("\n")
+                print(f"\n🤖 Assistant: {response}\n")
                 
             except KeyboardInterrupt:
                 print("\n\n⚠️  Interrupted. Type '/quit' to exit or continue chatting.\n")
