@@ -84,6 +84,35 @@ services:
       retries: 3
       start_period: 5s
 
+  reachy-conversation:
+    image: reachy-hearing-thor:r38.2.arm64-sbsa-cu130-24.04
+    container_name: reachy-conversation-app
+    restart: unless-stopped
+    network_mode: host  # To access localhost:8100 vLLM server
+    volumes:
+      - .:/app  # Mount entire project
+      - /tmp/reachy_sockets:/tmp/reachy_sockets  # Shared socket directory
+    working_dir: /app
+    environment:
+      - SOCKET_PATH=/tmp/reachy_sockets/hearing.sock
+      - PYTHONUNBUFFERED=1
+    command: >
+      sh -c "
+      pip install --no-cache-dir -q httpx mcp &&
+      python3 conversation_app.py
+      "
+    depends_on:
+      reachy-hearing:
+        condition: service_healthy
+      vllm-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "conversation_app.py"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
 volumes:
   huggingface_cache:
     driver: local
