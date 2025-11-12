@@ -1,19 +1,4 @@
-# Requirements for Reachy Hearing Event Emitter with Audio Processing
-
-# Core audio processing
-numpy>=1.24.0
-pyaudio>=0.2.13
-
-# Voice Activity Detection (SileroVAD)
-torch>=2.0.0
-torchaudio>=2.0.0
-silero-vad>=5.1.2
-
-# Speech Recognition (Faster Whisper)
-faster-whisper>=1.0.0
-
-# Language Detection
-langdetect>=1.0.9
-
-# Utilities
-scipy>=1.10.0
+pyaudio==0.2.14
+webrtcvad==2.0.10
+numpy==2.3.4
+python-dotenv==1.0.0

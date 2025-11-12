@@ -58,29 +58,31 @@ services:
       retries: 3
       start_period: 60s
 
-  # reachy-hearing:
-  #   image: reachy-hearing-thor:r38.2.arm64-sbsa-cu130-24.04
-  #   container_name: reachy-hearing-service
-  #   restart: unless-stopped
-  #   privileged: true  # Required for audio device access
-  #   devices:
-  #     - /dev/snd:/dev/snd  # Audio devices
-  #   volumes:
-  #     - ./hearing_app:/app
-  #     - /tmp/reachy_sockets:/tmp/reachy_sockets  # Shared socket directory
-  #     - /dev/shm:/dev/shm  # Shared memory for audio buffers
-  #   working_dir: /app
-  #   environment:
-  #     - PULSE_SERVER=unix:/run/user/1000/pulse/native  # Optional: PulseAudio
-  #   command: bash
-  #   stdin_open: true
-  #   tty: true
-  #   healthcheck:
-  #     test: ["CMD", "test", "-S", "/tmp/reachy_sockets/hearing.sock"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 3
-  #     start_period: 5s
+  reachy-hearing:
+    image: reachy-hearing-thor:r38.2.arm64-sbsa-cu130-24.04
+    container_name: reachy-hearing-service
+    restart: unless-stopped
+    privileged: true  # Required for audio device access
+    devices:
+      - /dev/snd:/dev/snd  # Audio devices
+    volumes:
+      - ./hearing_app:/app
+      - /tmp/reachy_sockets:/tmp/reachy_sockets  # Shared socket directory
+      - /dev/shm:/dev/shm  # Shared memory for audio buffers
+    working_dir: /app
+    environment:
+      - PULSE_SERVER=unix:/run/user/1000/pulse/native  # Optional: PulseAudio
+    command: >
+      sh -c "
+      pip install --no-cache-dir -q -r /app/requirements.txt &&
+      python3 hearing_event_emitter.py --device ReSpeaker --language en
+      "
+    healthcheck:
+      test: ["CMD", "test", "-S", "/tmp/reachy_sockets/hearing.sock"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
 
 volumes:
   huggingface_cache:

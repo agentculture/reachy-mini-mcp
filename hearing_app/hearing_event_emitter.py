@@ -1,306 +1,408 @@
 #!/usr/bin/env python3
 """
-Hearing Event Emitter - Emits events via Unix Domain Socket
+Hearing Event Emitter - Service that detects speech using VAD and emits events
 
-This service creates a Unix Domain Socket server that emits hearing events
-to connected clients. External applications can connect to the socket to
-receive real-time event notifications.
+This service listens to audio input, detects speech using Voice Activity Detection,
+and emits events via Unix Domain Socket to connected clients.
 
-Processes audio from ReSpeaker microphone using:
-- SileroVAD for voice activity detection
-- Faster-Whisper for speech transcription
-- Language detection to filter English speech
+Usage:
+    python3 hearing_event_emitter.py --device ReSpeaker --language en
 """
 
-import socket
-import os
-import json
+import pyaudio
+import webrtcvad
+import wave
 import time
-import sys
-import threading
-from datetime import datetime
-from pathlib import Path
 import numpy as np
+import os
+import socket
+import sys
+import logging
+import json
+import argparse
+from datetime import datetime
+from dotenv import load_dotenv
+import asyncio
+from collections import deque
+from pathlib import Path
 
-# Import audio processing modules
-try:
-    from voice_recorder import VoiceRecorder
-    AUDIO_MODULES_AVAILABLE = True
-except ImportError as e:
-    print(f"[WARNING] Audio modules not available: {e}")
-    print("[WARNING] Running in demo mode without audio processing")
-    AUDIO_MODULES_AVAILABLE = False
+# Set up logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+logger.info("Hearing Event Emitter starting...")
+
+# Load environment variables
+load_dotenv()
+logger.debug("Environment variables loaded")
 
 
 class HearingEventEmitter:
-    """Emits hearing events via Unix Domain Socket"""
+    """Service that detects speech and emits events via Unix Domain Socket"""
     
-    def __init__(
-        self,
-        socket_path="/tmp/reachy_sockets/hearing.sock",
-        use_audio=True,
-        device_name="ReSpeaker",
-        whisper_model="base",
-        target_language="en"
-    ):
-        """
-        Initialize the hearing event emitter
+    def __init__(self, device_name=None, language='en'):
+        logger.info("Initializing HearingEventEmitter")
         
-        Args:
-            socket_path: Path to Unix Domain Socket
-            use_audio: Whether to use real audio processing (False for demo mode)
-            device_name: Audio device name to search for
-            whisper_model: Whisper model size (tiny, base, small, medium, large-v3)
-            target_language: Target language to detect (e.g., "en" for English)
-        """
-        self.socket_path = socket_path
-        self.clients = []
+        # Configuration from environment or defaults
+        self.device_name = (device_name or os.getenv('AUDIO_DEVICE_NAME', 'default')).lower()
+        self.language = language
+        self.socket_path = os.getenv('SOCKET_PATH', '/tmp/reachy_sockets/hearing.sock')
+        
+        # Audio configuration
+        self.rate = int(os.getenv('SAMPLE_RATE', '16000'))
+        self.chunk_duration_ms = int(os.getenv('CHUNK_DURATION_MS', '30'))
+        self.chunk_size = int(self.rate * self.chunk_duration_ms / 1000)
+        
+        # VAD configuration
+        vad_aggressiveness = int(os.getenv('VAD_AGGRESSIVENESS', '3'))
+        self.vad = webrtcvad.Vad(vad_aggressiveness)
+        
+        # Speech detection configuration
+        self.min_silence_duration = float(os.getenv('MIN_SILENCE_DURATION', '2.5'))
+        self.lower_threshold = int(os.getenv('SPEECH_THRESHOLD_LOWER', '1500'))
+        self.upper_threshold = int(os.getenv('SPEECH_THRESHOLD_UPPER', '2500'))
+        self.min_audio_bytes = 4000
+        
+        # Buffers
+        buffer_size = int(os.getenv('AUDIO_BUFFER_SIZE', '100'))
+        self.audio_buffer = deque(maxlen=buffer_size)
+        self.speech_buffer = []
+        
+        # State
+        self.speech_detected = False
+        self.silence_start_time = None
+        self.start_time = None
+        self.speech_events = 0
+        self.processing_lock = asyncio.Lock()
+        
+        # Socket setup
         self.server_socket = None
-        self.running = False
-        self.shutdown_event = threading.Event()  # For clean shutdown
-        self.lock = threading.Lock()
+        self.clients = []
+        self.setup_socket_server()
         
-        # Audio processing components
-        self.use_audio = use_audio and AUDIO_MODULES_AVAILABLE
-        self.voice_recorder = None
-        self.device_name = device_name
-        self.whisper_model = whisper_model
-        self.target_language = target_language
+        # Audio setup
+        self.p = pyaudio.PyAudio()
+        self.stream = None
+        self.input_device_index = None
         
-        # Event sequence counter
-        self.event_sequence = 0
+        logger.info("HearingEventEmitter initialization complete")
+    
+    def setup_socket_server(self):
+        """Set up Unix Domain Socket server"""
+        logger.debug(f"Setting up Unix socket server at {self.socket_path}")
         
-    def setup_socket(self):
-        """Create and configure the Unix Domain Socket"""
-        # Ensure directory exists
+        # Create socket directory if it doesn't exist
         socket_dir = os.path.dirname(self.socket_path)
-        Path(socket_dir).mkdir(parents=True, exist_ok=True)
+        os.makedirs(socket_dir, exist_ok=True)
         
         # Remove existing socket file if it exists
         if os.path.exists(self.socket_path):
             os.remove(self.socket_path)
         
-        # Create Unix Domain Socket
+        # Create socket
         self.server_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.server_socket.bind(self.socket_path)
+        self.server_socket.listen(5)
+        self.server_socket.setblocking(False)
         
-        # Set permissions to allow external connections
+        # Set permissions
         os.chmod(self.socket_path, 0o666)
         
-        self.server_socket.listen(5)
-        print(f"[INFO] Listening on Unix socket: {self.socket_path}")
+        logger.info(f"Socket server listening on {self.socket_path}")
+    
+    def initialize_input_device(self):
+        """Find and initialize audio input device"""
+        wait_times = [1, 2, 4, 8, 16, 32]
+        for wait_time in wait_times:
+            self.input_device_index = self.find_input_device()
+            if self.input_device_index is not None:
+                break
+            logger.warning(f"Input device not found, retrying in {wait_time} seconds...")
+            time.sleep(wait_time)
+        else:
+            logger.error("Suitable input device not found after multiple attempts")
+            raise RuntimeError("Suitable input device not found")
         
-    def accept_connections(self):
+        logger.info(f"Using audio device index: {self.input_device_index}")
+    
+    def find_input_device(self):
+        """Search for audio input device by name"""
+        logger.info("Searching for input device")
+        device_count = self.p.get_device_count()
+        logger.info(f"Found {device_count} audio devices")
+        
+        for i in range(device_count):
+            device_info = self.p.get_device_info_by_index(i)
+            device_name = device_info['name'].lower()
+            logger.debug(f"Checking device {i}: {device_name}")
+            
+            if self.device_name in device_name and device_info['maxInputChannels'] > 0:
+                logger.info(f"Found matching device: {device_info['name']} (index {i})")
+                return i
+        
+        logger.warning("Suitable input device not found")
+        return None
+    
+    def setup_audio_stream(self):
+        """Open audio stream"""
+        try:
+            self.stream = self.p.open(
+                format=pyaudio.paInt16,
+                channels=1,
+                rate=self.rate,
+                input=True,
+                frames_per_buffer=self.chunk_size,
+                input_device_index=self.input_device_index
+            )
+            logger.info("Audio stream opened successfully")
+        except IOError as e:
+            logger.error(f"Error opening audio stream: {e}")
+            raise
+    
+    async def accept_clients(self):
         """Accept new client connections"""
-        print("[INFO] Connection acceptor thread started")
-        while self.running:
+        while True:
             try:
-                if self.server_socket is None:
-                    time.sleep(0.1)
-                    continue
-                    
-                self.server_socket.settimeout(0.5)  # Short timeout for responsiveness
+                # Try to accept new connections (non-blocking)
                 try:
                     client_socket, _ = self.server_socket.accept()
-                    with self.lock:
-                        self.clients.append(client_socket)
-                    print(f"[INFO] ✓ Client connected. Total clients: {len(self.clients)}")
-                except socket.timeout:
-                    continue
+                    client_socket.setblocking(False)
+                    self.clients.append(client_socket)
+                    logger.info(f"New client connected. Total clients: {len(self.clients)}")
+                except BlockingIOError:
+                    pass
+                
+                await asyncio.sleep(0.1)
             except Exception as e:
-                if self.running:
-                    print(f"[ERROR] Error accepting connection: {e}")
-                    time.sleep(0.1)
-        print("[INFO] Connection acceptor thread stopped")
-                    
-    def emit_event(self, event_type, data):
-        """Emit an event to all connected clients"""
-        # Add sequence number
-        data["sequence"] = self.event_sequence
-        self.event_sequence += 1
-        
+                logger.error(f"Error accepting clients: {e}")
+                await asyncio.sleep(1)
+    
+    async def emit_event(self, event_type, data=None):
+        """Emit event to all connected clients asynchronously"""
         event = {
-            "timestamp": datetime.now().isoformat(),
             "type": event_type,
-            "data": data
+            "timestamp": datetime.utcnow().isoformat(),
+            "data": data or {}
         }
         
         message = json.dumps(event) + "\n"
         message_bytes = message.encode('utf-8')
         
-        with self.lock:
-            disconnected = []
-            sent_count = 0
-            for client in self.clients:
-                try:
-                    client.sendall(message_bytes)
-                    sent_count += 1
-                except (BrokenPipeError, ConnectionResetError, OSError):
-                    disconnected.append(client)
-                    
-            # Remove disconnected clients
-            for client in disconnected:
-                try:
-                    client.close()
-                except:
-                    pass
-                self.clients.remove(client)
-                
-            if disconnected:
-                print(f"[INFO] ⚠ Removed {len(disconnected)} disconnected client(s). Active: {len(self.clients)}")
-            
-            if sent_count > 0 and event_type == "voice_activity":
-                print(f"[INFO] Event emitted to {sent_count} client(s): {event_type}")
+        # Send to all clients
+        disconnected_clients = []
+        for client in self.clients:
+            try:
+                # Run the blocking sendall in a thread to avoid blocking the event loop
+                await asyncio.to_thread(client.sendall, message_bytes)
+            except (BrokenPipeError, ConnectionResetError) as e:
+                logger.warning(f"Client disconnected: {e}")
+                disconnected_clients.append(client)
+            except Exception as e:
+                logger.error(f"Error sending to client: {e}")
+                disconnected_clients.append(client)
+        
+        # Remove disconnected clients
+        for client in disconnected_clients:
+            try:
+                client.close()
+            except:
+                pass
+            self.clients.remove(client)
+        
+        if disconnected_clients:
+            logger.info(f"Removed {len(disconnected_clients)} disconnected clients. Active: {len(self.clients)}")
+        
+        logger.debug(f"Emitted event: {event_type}")
     
-    def _on_transcription_callback(self, result):
-        """Callback for transcription results"""
+    def is_speech(self, data):
+        """Check if audio data contains speech using VAD"""
         try:
-            # Check if target language
-            is_target = (result['language'].lower() == self.target_language.lower()) if self.target_language else True
+            return self.vad.is_speech(data, self.rate)
+        except Exception as e:
+            logger.error(f"Error in VAD processing: {e}")
+            return False
+    
+    async def log_speech_event(self, event_type, duration=None):
+        """Log and emit speech detection events"""
+        current_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        
+        if event_type == "start":
+            self.speech_events += 1
+            message = f"Speech started (Event #{self.speech_events})"
+            logger.info(f"[{current_time}] {message}")
             
-            # Emit speech detected event
-            self.emit_event("speech_detected", {
-                "text": result["text"],
-                "language": result["language"],
-                "language_probability": result["language_probability"],
-                "is_target_language": is_target,
-                "duration": result["duration"]
+            await self.emit_event("speech_started", {
+                "event_number": self.speech_events,
+                "timestamp": current_time
             })
             
-            print(f"[EVENT] ✓ Speech: '{result['text']}' "
-                  f"[{result['language']}] "
-                  f"({result['language_probability']:.2f})")
+        elif event_type == "stop":
+            message = f"Speech stopped (Event #{self.speech_events})"
+            if duration:
+                message += f" - Duration: {duration:.2f} seconds"
             
-            if not is_target:
-                print(f"[INFO] Detected non-{self.target_language} speech: {result['language']}")
-                
-        except Exception as e:
-            print(f"[ERROR] Error in transcription callback: {e}")
+            logger.info(f"[{current_time}] {message}")
+            
+            await self.emit_event("speech_stopped", {
+                "event_number": self.speech_events,
+                "duration": duration,
+                "timestamp": current_time
+            })
     
-    def process_audio_stream(self):
-        """Process audio stream from ReSpeaker with VAD and transcription"""
-        if not self.use_audio:
-            print("[INFO] Audio processing disabled, using demo mode")
-            self.generate_sample_events()
+    async def listen(self):
+        """Continuously listen to audio and buffer it"""
+        while True:
+            try:
+                data = await asyncio.to_thread(
+                    self.stream.read,
+                    self.chunk_size,
+                    exception_on_overflow=False
+                )
+                np_data = np.frombuffer(data, dtype=np.int16)
+                
+                async with self.processing_lock:
+                    self.audio_buffer.append(np_data)
+                    
+            except Exception as e:
+                logger.error(f"Error during audio capture: {e}", exc_info=True)
+                await asyncio.sleep(0.1)
+    
+    async def process(self):
+        """Process buffered audio and detect speech"""
+        while True:
+            # Get data from buffer with minimal lock time
+            data = None
+            async with self.processing_lock:
+                if len(self.audio_buffer) > 0:
+                    data = self.audio_buffer.popleft()
+            
+            # Process data outside the lock
+            if data is not None:
+                # Run CPU-bound VAD check in a thread to avoid blocking the event loop
+                is_speech = await asyncio.to_thread(self.is_speech, data.tobytes())
+                
+                # Handle state (no lock needed here)
+                if is_speech:
+                    await self.handle_speech(data)
+                else:
+                    await self.handle_silence()
+            else:
+                # No data, sleep briefly
+                await asyncio.sleep(0.01)
+    
+    async def handle_speech(self, data):
+        """Handle detected speech"""
+        if not self.speech_detected:
+            self.start_time = time.time()
+            await self.log_speech_event("start")
+            self.speech_detected = True
+            self.speech_buffer = []
+            logger.debug("Speech detected, starting new buffer")
+        
+        self.speech_buffer.append(data)
+        self.silence_start_time = None  # Reset silence timer
+    
+    async def handle_silence(self):
+        """Handle silence (potential end of speech)"""
+        if self.speech_detected:
+            if self.silence_start_time is None:
+                self.silence_start_time = time.time()
+                logger.debug("Silence detected, starting silence timer")
+            elif time.time() - self.silence_start_time >= self.min_silence_duration:
+                logger.info("Silence duration exceeded, ending speech event")
+                await self.process_speech()
+    
+    async def process_speech(self):
+        """Process completed speech segment"""
+        duration = time.time() - self.start_time
+        audio_size = len(self.speech_buffer) * self.chunk_size * 2  # 2 bytes per sample
+        
+        logger.info(f"Processing speech segment: {len(self.speech_buffer)} chunks, {audio_size} bytes")
+        
+        # Emit completion event
+        await self.log_speech_event("stop", duration)
+        
+        # Optional: Save audio file for debugging
+        if os.getenv('SAVE_AUDIO_FILES', 'false').lower() == 'true':
+            await self.save_audio_file()
+        
+        # Reset state
+        self.speech_detected = False
+        self.silence_start_time = None
+        self.speech_buffer = []
+    
+    async def save_audio_file(self):
+        """Save recorded speech to file"""
+        if not self.speech_buffer:
             return
         
-        print("[INFO] Initializing voice recorder...")
-        
         try:
-            # Initialize voice recorder with callback
-            self.voice_recorder = VoiceRecorder(
-                device_name=self.device_name,
-                model_size=self.whisper_model,
-                device="cuda",
-                initial_prompt="The following is a clear and accurate transcription:",
-                language=None,  # Auto-detect
-                on_transcription=self._on_transcription_callback
-            )
+            combined_audio = np.concatenate(self.speech_buffer)
+            filename = f"speech_{self.speech_events}_{int(time.time())}.wav"
             
-            # Start voice recorder (this will block in its main loop)
-            print("[INFO] Starting voice recorder...")
-            self.voice_recorder.start()
-                    
-        except KeyboardInterrupt:
-            print("\n[INFO] Audio processing interrupted")
+            await asyncio.to_thread(self._save_audio_sync, combined_audio, filename)
+            logger.info(f"Saved audio to {filename}")
         except Exception as e:
-            print(f"[ERROR] Fatal error in audio processing: {e}")
-            import traceback
-            traceback.print_exc()
-        finally:
-            # Cleanup audio resources
-            print("[INFO] Cleaning up audio resources...")
-            if self.voice_recorder:
-                self.voice_recorder.stop()
-            print("[INFO] Audio processing stopped")
+            logger.error(f"Error saving audio file: {e}")
     
-    def generate_sample_events(self):
-        """Generate sample hearing events for demonstration (fallback mode)"""
-        print("[INFO] Running in demo mode - generating sample events")
+    def _save_audio_sync(self, audio_data, filename):
+        """Synchronous audio file writing"""
+        with wave.open(filename, 'wb') as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(self.p.get_sample_size(pyaudio.paInt16))
+            wav_file.setframerate(self.rate)
+            wav_file.writeframes(audio_data.tobytes())
+    
+    async def run(self):
+        """Main run loop"""
+        logger.info("Starting Hearing Event Emitter service")
+        logger.info(f"Device: {self.device_name}")
+        logger.info(f"Rate: {self.rate} Hz")
+        logger.info(f"Socket: {self.socket_path}")
         
-        event_types = [
-            ("speech_detected", {
-                "text": "Hello", 
-                "confidence": 0.95, 
-                "language": "en",
-                "language_probability": 0.98,
-                "is_target_language": True,
-                "duration": 1.2
-            }),
-            ("sound_detected", {
-                "type": "clap", 
-                "intensity": 0.8, 
-                "direction": "front"
-            }),
-            ("keyword_spotted", {
-                "keyword": "reachy", 
-                "confidence": 0.92
-            }),
-            ("noise_level", {
-                "level": 65, 
-                "unit": "dB"
-            }),
-            ("voice_activity", {
-                "active": True, 
-                "duration": 2.3
-            }),
-        ]
+        # Initialize audio device
+        self.initialize_input_device()
+        self.setup_audio_stream()
         
-        counter = 0
-        while self.running:
-            time.sleep(3)  # Emit event every 3 seconds
-            
-            event_type, data = event_types[counter % len(event_types)]
-            
-            self.emit_event(event_type, data)
-            print(f"[EVENT] Demo: {event_type} - {data}")
-            
-            counter += 1
-            
-    def start(self):
-        """Start the event emitter service"""
-        print("[INFO] Starting Hearing Event Emitter...")
-        print(f"[INFO] Audio processing: {'ENABLED' if self.use_audio else 'DISABLED (demo mode)'}")
-        if self.use_audio:
-            print(f"[INFO] Device: {self.device_name}")
-            print(f"[INFO] Whisper model: {self.whisper_model}")
-            print(f"[INFO] Target language: {self.target_language}")
-        
-        self.running = True
+        # Start tasks
+        accept_task = asyncio.create_task(self.accept_clients())
+        listen_task = asyncio.create_task(self.listen())
+        process_task = asyncio.create_task(self.process())
         
         try:
-            self.setup_socket()
-            
-            # Start connection acceptor thread
-            accept_thread = threading.Thread(target=self.accept_connections, daemon=True)
-            accept_thread.start()
-            
-            # Process audio stream (or generate sample events)
-            self.process_audio_stream()
-            
-        except KeyboardInterrupt:
-            print("\n[INFO] Shutting down...")
+            await asyncio.gather(accept_task, listen_task, process_task)
         except Exception as e:
-            print(f"[ERROR] Fatal error: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"Error during service operation: {e}", exc_info=True)
         finally:
-            self.stop()
-            
-    def stop(self):
-        """Stop the service and cleanup"""
-        print("[INFO] Stopping service...")
-        self.running = False
-        self.shutdown_event.set()  # Signal shutdown to all threads
+            self.cleanup()
+    
+    def cleanup(self):
+        """Clean up resources"""
+        logger.info("Cleaning up resources")
+        
+        # Close audio stream
+        if self.stream:
+            try:
+                self.stream.stop_stream()
+                self.stream.close()
+            except:
+                pass
+        
+        # Terminate PyAudio
+        if self.p:
+            try:
+                self.p.terminate()
+            except:
+                pass
         
         # Close all client connections
-        with self.lock:
-            for client in self.clients:
-                try:
-                    client.close()
-                except:
-                    pass
-            self.clients.clear()
+        for client in self.clients:
+            try:
+                client.close()
+            except:
+                pass
         
         # Close server socket
         if self.server_socket:
@@ -315,33 +417,40 @@ class HearingEventEmitter:
                 os.remove(self.socket_path)
             except:
                 pass
-                
-        print("[INFO] Service stopped")
+        
+        logger.info("Cleanup complete")
 
 
-if __name__ == "__main__":
-    import argparse
-    
-    parser = argparse.ArgumentParser(description="Reachy Hearing Event Emitter")
-    parser.add_argument("--socket-path", default="/tmp/reachy_sockets/hearing.sock",
-                        help="Unix socket path")
-    parser.add_argument("--demo", action="store_true",
-                        help="Run in demo mode without audio processing")
-    parser.add_argument("--device", default="ReSpeaker",
-                        help="Audio device name to search for")
-    parser.add_argument("--model", default="base",
-                        choices=["tiny", "base", "small", "medium", "large-v3"],
-                        help="Whisper model size")
-    parser.add_argument("--language", default="en",
-                        help="Target language to detect (e.g., 'en' for English)")
+def main():
+    """Main entry point"""
+    parser = argparse.ArgumentParser(
+        description='Hearing Event Emitter - VAD-based speech detection service'
+    )
+    parser.add_argument(
+        '--device',
+        type=str,
+        default=None,
+        help='Audio device name (e.g., ReSpeaker, default)'
+    )
+    parser.add_argument(
+        '--language',
+        type=str,
+        default='en',
+        help='Language code for future use (default: en)'
+    )
     
     args = parser.parse_args()
     
-    emitter = HearingEventEmitter(
-        socket_path=args.socket_path,
-        use_audio=not args.demo,
-        device_name=args.device,
-        whisper_model=args.model,
-        target_language=args.language
-    )
-    emitter.start()
+    emitter = HearingEventEmitter(device_name=args.device, language=args.language)
+    
+    try:
+        asyncio.run(emitter.run())
+    except KeyboardInterrupt:
+        logger.info("Keyboard interrupt received, terminating...")
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}", exc_info=True)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
