@@ -98,6 +98,8 @@ services:
       - PULSE_SERVER=unix:/run/user/1000/pulse/native  # Optional: PulseAudio
     command: >
       sh -c "
+      apt-get update -qq &&
+      apt-get install -y -qq portaudio*-dev libgl1 libusb-1.0-0 git &&
       pip install --no-cache-dir -q -r /app/requirements.txt &&
       python3 hearing_event_emitter.py --device ReSpeaker --language en
       "
