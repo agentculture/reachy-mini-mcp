@@ -92,15 +92,30 @@ class ConversationApp:
         logger.info(f"Server configuration:")
         logger.info(f"   Command: {server_config['command']}")
         logger.info(f"   Args: {server_config['args']}")
-        env_vars = server_config.get('env', {})
+        
+        # Merge environment variables: mcp.json config + current environment
+        env_vars = server_config.get('env', {}).copy()
+        
+        # Pass through important environment variables from current process
+        if 'REACHY_BASE_URL' in os.environ:
+            env_vars['REACHY_BASE_URL'] = os.environ['REACHY_BASE_URL']
+            logger.info(f"   Passing REACHY_BASE_URL: {env_vars['REACHY_BASE_URL']}")
+        
+        if 'PIPER_MODEL' in os.environ:
+            env_vars['PIPER_MODEL'] = os.environ['PIPER_MODEL']
+        
+        if 'AUDIO_DEVICE' in os.environ:
+            env_vars['AUDIO_DEVICE'] = os.environ['AUDIO_DEVICE']
+        
         for key, value in env_vars.items():
             logger.info(f"      {key}: {value}")
+        
         # Initialize MCP client
         logger.info("Starting MCP server...")
         server_params = StdioServerParameters(
             command=server_config["command"],
             args=server_config["args"],
-            env=server_config.get("env", {})
+            env=env_vars
         )
         
         # Store contexts for later cleanup

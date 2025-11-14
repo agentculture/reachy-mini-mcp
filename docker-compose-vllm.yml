@@ -58,6 +58,33 @@ services:
       retries: 3
       start_period: 60s
 
+  reachy-daemon:
+    image: reachy-hearing-thor:r38.2.arm64-sbsa-cu130-24.04
+    container_name: reachy-mini-daemon
+    restart: unless-stopped
+    privileged: true  # Required for USB device access
+    network_mode: host  # To expose daemon on localhost:8000
+    devices:
+      - /dev/bus/usb:/dev/bus/usb  # USB devices for robot connection
+    volumes:
+      - .:/app  # Mount project for requirements.txt
+      - /dev:/dev  # Device access
+    working_dir: /app
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: >
+      sh -c "
+      pip install --no-cache-dir -q -r /app/requirements.txt &&
+      echo '🤖 Starting Reachy Mini Daemon...' &&
+      reachy-mini-daemon
+      "
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
   reachy-hearing:
     image: reachy-hearing-thor:r38.2.arm64-sbsa-cu130-24.04
     container_name: reachy-hearing-service
@@ -96,12 +123,15 @@ services:
     environment:
       - SOCKET_PATH=/tmp/reachy_sockets/hearing.sock
       - PYTHONUNBUFFERED=1
+      - REACHY_BASE_URL=http://localhost:8000  # Daemon URL (accessible via host network mode)
     command: >
       sh -c "
       pip install --no-cache-dir -q httpx mcp &&
       python3 conversation_app.py
       "
     depends_on:
+      reachy-daemon:
+        condition: service_healthy
       reachy-hearing:
         condition: service_healthy
       vllm-server:

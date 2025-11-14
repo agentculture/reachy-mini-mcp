@@ -28,7 +28,7 @@ load_dotenv()
 mcp = FastMCP("Reachy Mini Controller")
 
 # Configuration
-REACHY_BASE_URL = "http://localhost:8000"
+REACHY_BASE_URL = os.getenv("REACHY_BASE_URL", "http://localhost:8000")
 TOOLS_REPOSITORY_PATH = Path(__file__).parent / "tools_repository"
 
 # TTS Queue (initialized in initialize_server)
