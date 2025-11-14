@@ -82,25 +82,6 @@ services:
       retries: 5
       start_period: 30s
 
-  respeaker-reboot:
-    image: alpine:latest
-    container_name: respeaker-reboot-fix
-    privileged: true  # Required for USB device access
-    devices:
-      - /dev/bus/usb:/dev/bus/usb  # USB devices
-    volumes:
-      - /home/thor/git/reSpeaker_XVF3800_USB_4MIC_ARRAY:/respeaker  # Mount reSpeaker repo
-    command: >
-      sh -c "
-      echo '🎤 Applying ReSpeaker reboot fix...' &&
-      /respeaker/host_control/jetson/xvf_host REBOOT 1 &&
-      echo '✓ ReSpeaker reboot completed' &&
-      sleep 2
-      "
-    depends_on:
-      reachy-daemon:
-        condition: service_healthy
-
   reachy-hearing:
     image: reachy-hearing-thor:r38.2.arm64-sbsa-cu130-24.04
     container_name: reachy-hearing-service
@@ -121,8 +102,8 @@ services:
       python3 hearing_event_emitter.py --device ReSpeaker --language en
       "
     depends_on:
-      respeaker-reboot:
-        condition: service_completed_successfully
+      reachy-daemon:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "test", "-S", "/tmp/reachy_sockets/hearing.sock"]
       interval: 10s
