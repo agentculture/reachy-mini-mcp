@@ -59,7 +59,7 @@ services:
       start_period: 60s
 
   reachy-daemon:
-    image: reachy-hearing-thor:r38.2.arm64-sbsa-cu130-24.04
+    image: reachy-daemon-thor:r38.2.aarch64-cu130-24.04
     container_name: reachy-mini-daemon
     restart: unless-stopped
     privileged: true  # Required for USB device access
@@ -72,14 +72,11 @@ services:
     working_dir: /app
     environment:
       - PYTHONUNBUFFERED=1
-    command: >
-      sh -c "
-      pip install --no-cache-dir -q -r /app/requirements.txt &&
-      echo '🤖 Starting Reachy Mini Daemon...' &&
-      reachy-mini-daemon
-      "
+    stop_signal: SIGTERM  # Send SIGTERM for graceful shutdown
+    stop_grace_period: 15s  # Allow 15 seconds for graceful shutdown
+    command: ["/bin/bash", "/app/start_daemon.sh"]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/daemon/status"]
       interval: 15s
       timeout: 5s
       retries: 5
