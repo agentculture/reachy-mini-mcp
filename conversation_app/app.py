@@ -41,6 +41,7 @@ import logging
 from .event_handler import EventHandler
 from .conversation_parser import ConversationParser
 from .speech_handler import SpeechHandler
+from .action_handler import ActionHandler
 
 # Set up logging
 logging.basicConfig(
@@ -73,6 +74,7 @@ class ConversationApp:
         self.event_handler = EventHandler(socket_path)
         self.parser = ConversationParser()
         self.speech_handler = None  # Will be initialized in initialize()
+        self.action_handler = None  # Will be initialized in initialize()
         
         # Set up event callbacks
         self.event_handler.set_speech_started_callback(self.on_speech_started)
@@ -98,6 +100,15 @@ class ConversationApp:
             logger.warning("   Continuing without TTS...")
             self.speech_handler = None
         
+        # Initialize action handler
+        try:
+            self.action_handler = ActionHandler()
+            logger.info("✓ Action handler initialized")
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize action handler: {e}")
+            logger.warning("   Continuing without action execution...")
+            self.action_handler = None
+        
         logger.info("✓ App initialized")
         logger.info("=" * 70)
     
@@ -112,6 +123,11 @@ class ConversationApp:
         if self.speech_handler:
             logger.info("🔇 User started speaking - clearing TTS queue")
             await self.speech_handler.clear()
+        
+        # Clear action queue when user starts speaking to stop current actions
+        if self.action_handler:
+            logger.info("🚫 User started speaking - clearing action queue")
+            await self.action_handler.clear()
     
     async def on_speech_stopped(self, data: Dict[str, Any]):
         """
@@ -226,6 +242,10 @@ class ConversationApp:
         if self.speech_handler:
             await self.speech_handler.clear()
         
+        # Clear any pending actions when new user input arrives
+        if self.action_handler:
+            await self.action_handler.clear()
+        
         # Collect full response
         full_response = ""
         
@@ -243,6 +263,13 @@ class ConversationApp:
                 if speech_text and self.speech_handler:
                     logger.info(f'🗣️  Speaking: "{speech_text[:50]}..."' if len(speech_text) > 50 else f'🗣️  Speaking: "{speech_text}"')
                     await self.speech_handler.speak(speech_text)
+            
+            # Process any action items that were just parsed
+            while self.parser.has_action():
+                action_text = self.parser.get_action()
+                if action_text and self.action_handler:
+                    logger.info(f'⚡ Executing action: **{action_text}**')
+                    await self.action_handler.execute(action_text)
         
         # Add assistant response to conversation history
         self.messages.append({"role": "assistant", "content": full_response})
@@ -284,6 +311,9 @@ class ConversationApp:
         
         if self.speech_handler:
             self.speech_handler.cleanup()
+        
+        if self.action_handler:
+            self.action_handler.cleanup()
         
         self.event_handler.close()
         
