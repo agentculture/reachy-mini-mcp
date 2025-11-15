@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 
 # Configuration
 CHAT_COMPLETIONS_URL = "http://localhost:8100/v1/chat/completions"
-MODEL_NAME = "RedHatAI/Llama-3.2-1B-Instruct-FP8"
+MODEL_NAME = "RedHatAI/Llama-3.2-3B-Instruct-FP8"
 AGENT_TEMPERATURE = 0.3
 
 class ConversationApp:
@@ -103,6 +103,9 @@ class ConversationApp:
         # Initialize action handler
         try:
             self.action_handler = ActionHandler()
+            # Warm up action handler in background
+            asyncio.create_task(self.action_handler.execute("nod head"))
+
             logger.info("✓ Action handler initialized")
         except Exception as e:
             logger.error(f"❌ Failed to initialize action handler: {e}")
@@ -332,7 +335,8 @@ class ConversationApp:
         # Add assistant response to conversation history
         self.messages.append({"role": "assistant", "content": full_response})
         
-        await _warm_up_for_caching(full_response)
+        # Run warm-up for caching in background
+        asyncio.create_task(self._warm_up_for_caching(full_response))
         
         return full_response
     
@@ -349,7 +353,7 @@ class ConversationApp:
         logger.info("  4. Parse responses into quotes and actions")
         logger.info("=" * 70)
         logger.info("")
-        
+    
         # Connect to hearing service
         logger.info("Step 1: Connecting to hearing service...")
         await self.event_handler.connect()

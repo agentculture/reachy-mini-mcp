@@ -38,7 +38,7 @@ services:
       --max-num-batched-tokens 32768
       --max-model-len 65536
       --tensor-parallel-size 1 
-      --gpu-memory-utilization 0.5
+      --gpu-memory-utilization 0.25
       --enable-prefix-caching 
       --enable-chunked-prefill 
       --host 0.0.0.0 
@@ -118,6 +118,9 @@ services:
     container_name: reachy-conversation-app
     restart: unless-stopped
     network_mode: host  # To access localhost:8100 vLLM server
+    privileged: true  # Required for audio device access
+    devices:
+      - /dev/snd:/dev/snd  # Audio devices for TTS playback
     volumes:
       - .:/app  # Mount entire project
       - /tmp/reachy_sockets:/tmp/reachy_sockets  # Shared socket directory
@@ -128,7 +131,9 @@ services:
       - REACHY_BASE_URL=http://localhost:8000  # Daemon URL (accessible via host network mode)
     command: >
       sh -c "
-      pip install --no-cache-dir -q httpx mcp &&
+      apt-get update -qq &&
+      apt-get install -y -qq alsa-utils &&
+      pip install --no-cache-dir -q -r /app/conversation_app/requirements.txt &&
       python3 -m conversation_app.app
       "
     depends_on:
