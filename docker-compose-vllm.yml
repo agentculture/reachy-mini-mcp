@@ -129,6 +129,7 @@ services:
       - SOCKET_PATH=/tmp/reachy_sockets/hearing.sock
       - PYTHONUNBUFFERED=1
       - REACHY_BASE_URL=http://localhost:8000  # Daemon URL (accessible via host network mode)
+      - AUDIO_DEVICE=plughw:CARD=Array,DEV=0  # Use ReSpeaker for TTS output (enables AEC)
     command: >
       sh -c "
       apt-get update -qq &&

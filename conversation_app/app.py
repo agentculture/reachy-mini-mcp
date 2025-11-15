@@ -239,10 +239,7 @@ class ConversationApp:
             "temperature": AGENT_TEMPERATURE,
             "stream": True
         }
-        
-        # Collect the full assistant response for caching
-        full_assistant_response = ""
-        
+                
         async with httpx.AsyncClient(timeout=60.0) as client:
             try:
                 async with client.stream("POST", CHAT_COMPLETIONS_URL, json=payload) as response:
@@ -264,7 +261,6 @@ class ConversationApp:
                                     content = delta.get("content", "")
                                     
                                     if content:
-                                        full_assistant_response += content
                                         yield content
                                         
                             except json.JSONDecodeError:
@@ -335,6 +331,7 @@ class ConversationApp:
         # Add assistant response to conversation history
         self.messages.append({"role": "assistant", "content": full_response})
         
+        logger.info(f"✓ Full response received: {full_response[:50]}")
         # Run warm-up for caching in background
         asyncio.create_task(self._warm_up_for_caching(full_response))
         

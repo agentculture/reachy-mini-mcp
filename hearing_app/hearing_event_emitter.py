@@ -118,6 +118,8 @@ class HearingEventEmitter:
         self.p = pyaudio.PyAudio()
         self.stream = None
         self.input_device_index = None
+        self.num_channels = 1  # Default to mono
+        self.use_aec_channel = False  # Whether to use AEC channel 0 from 2-channel device
         
         logger.info("HearingEventEmitter initialization complete")
     
@@ -180,15 +182,32 @@ class HearingEventEmitter:
     def setup_audio_stream(self):
         """Open audio stream"""
         try:
+            # Check if this is the ReSpeaker device with 2 channels (AEC support)
+            device_info = self.p.get_device_info_by_index(self.input_device_index)
+            max_channels = device_info.get('maxInputChannels', 1)
+            
+            # ReSpeaker XVF3800 has 2 channels:
+            # Channel 0: AEC-processed microphone (echo-cancelled)
+            # Channel 1: Reference/playback signal
+            # We need to record both channels but will use only channel 0
+            if 'respeaker' in device_info['name'].lower() and max_channels >= 2:
+                self.num_channels = 2
+                self.use_aec_channel = True
+                logger.info("Using ReSpeaker with 2-channel AEC mode (will use channel 0 for echo cancellation)")
+            else:
+                self.num_channels = 1
+                self.use_aec_channel = False
+                logger.info("Using single-channel mode")
+            
             self.stream = self.p.open(
                 format=pyaudio.paInt16,
-                channels=1,
+                channels=self.num_channels,
                 rate=self.rate,
                 input=True,
                 frames_per_buffer=self.chunk_size,
                 input_device_index=self.input_device_index
             )
-            logger.info("Audio stream opened successfully")
+            logger.info(f"Audio stream opened successfully with {self.num_channels} channel(s)")
         except IOError as e:
             logger.error(f"Error opening audio stream: {e}")
             raise
@@ -292,6 +311,11 @@ class HearingEventEmitter:
                     exception_on_overflow=False
                 )
                 np_data = np.frombuffer(data, dtype=np.int16)
+                
+                # If using 2-channel ReSpeaker, extract only channel 0 (AEC-processed)
+                if self.use_aec_channel and self.num_channels == 2:
+                    # Reshape to (frames, channels) and take only channel 0
+                    np_data = np_data.reshape(-1, 2)[:, 0]
                 
                 async with self.processing_lock:
                     self.audio_buffer.append(np_data)
