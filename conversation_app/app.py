@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 
 # Configuration
 CHAT_COMPLETIONS_URL = "http://localhost:8100/v1/chat/completions"
-MODEL_NAME = "RedHatAI/Llama-3.2-3B-Instruct-FP8"
+MODEL_NAME = "RedHatAI/Llama-3.2-1B-Instruct-FP8"
 
 
 class ConversationApp:
@@ -212,6 +212,21 @@ class ConversationApp:
                 raise
             except Exception as e:
                 logger.error(f"Error during streaming chat completion: {e}")
+                raise
+        # send dummy request for next token caching
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            payload = {
+                "model": MODEL_NAME,
+                "messages": messages,
+                "max_tokens": 1,
+                "temperature": 0.3,
+                "stream": False
+            }
+            try:
+                response = await client.post(CHAT_COMPLETIONS_URL, json=payload)
+                response.raise_for_status()
+            except Exception as e:
+                logger.error(f"Error during dummy request for caching: {e}")
                 raise
     
     async def process_message(self, user_message: str) -> str:

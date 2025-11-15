@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 # Configuration
 CHAT_COMPLETIONS_URL = "http://localhost:8100/v1/chat/completions"
-MODEL_NAME = "RedHatAI/Llama-3.2-3B-Instruct-FP8"
+MODEL_NAME = "RedHatAI/Llama-3.2-1B-Instruct-FP8"
 
 
 class ActionHandler:
@@ -62,6 +62,10 @@ class ActionHandler:
         try:
             system_prompt_path = Path(__file__).parent / "agents" / "action-handler" / "action-handler.system.md"
             self.system_prompt = system_prompt_path.read_text()
+            # make max_token request for caching
+            await self._parse_action_with_llm("Initialize action handler.")
+                
+
             logger.info("✓ Loaded action handler system prompt")
         except Exception as e:
             logger.error(f"❌ Failed to load system prompt: {e}")

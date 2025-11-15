@@ -259,7 +259,7 @@ class HearingEventEmitter:
         if event_type == "start":
             self.speech_events += 1
             message = f"Speech started (Event #{self.speech_events})"
-            logger.info(f"[{current_time}] {message}")
+            logger.info(f"[{current_time}] {message} {transcription}")
             
             await self.emit_event("speech_started", {
                 "event_number": self.speech_events,
@@ -385,14 +385,17 @@ class HearingEventEmitter:
                 logger.info(f"Transcription result: '{transcription}'")
             except Exception as e:
                 logger.error(f"Error during transcription: {e}", exc_info=True)
-        
-        # Emit completion event with transcription
-        await self.log_speech_event("stop", duration, transcription)
-        
-        # Optional: Save audio file for debugging
-        if os.getenv('SAVE_AUDIO_FILES', 'false').lower() == 'true':
-            await self.save_audio_file(all_audio_chunks)
-        
+        # contains characters
+        if transcription and any(c.isalnum() for c in transcription):
+            # Emit completion event with transcription
+            await self.log_speech_event("stop", duration, transcription)
+            
+            # Optional: Save audio file for debugging
+            if os.getenv('SAVE_AUDIO_FILES', 'false').lower() == 'true':
+                await self.save_audio_file(all_audio_chunks)
+        else:
+            logger.info("No valid transcription obtained")
+            logger.info("Emitting speech stopped event without transcription")
         # Reset state
         self.speech_detected = False
         self.silence_start_time = None
