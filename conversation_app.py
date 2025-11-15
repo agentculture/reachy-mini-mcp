@@ -3,28 +3,28 @@
 Conversation Application with Speech Event Integration
 
 This application listens to speech events from the hearing_event_emitter service
-and processes them through the vLLM chat system with MCP tool integration.
+and processes them through the vLLM streaming chat system.
 
 Instead of accepting text input from the user, this app responds to speech
 detection events emitted via Unix Domain Socket.
 
 Key features:
 1. Listens to speech_started/speech_stopped events
-2. Processes speech events through vLLM chat completion
-3. Full MCP tool integration (robot control)
-4. Automatic conversation flow based on speech detection
-5. Text-to-speech responses via robot
+2. Processes speech events through vLLM streaming chat completion
+3. Parses responses for quotes "..." (speech) and **...** (actions)
+4. Queues speech and actions for separate processing
+5. Automatic conversation flow based on speech detection
+
+Output format:
+- Text in quotes "..." -> Speech queue (for TTS)
+- Text in **...** -> Action queue (for movement)
 
 Usage:
     python conversation_app.py
     
 Requirements:
     - Hearing event emitter running (hearing_event_emitter.py)
-    - Reachy Mini daemon running (reachy-mini-daemon)
-    - vLLM server running on http://localhost:8100 with:
-      --enable-auto-tool-choice
-      --tool-call-parser llama3_json
-    - MCP server configured in mcp.json
+    - vLLM server running on http://localhost:8100 with streaming support
 """
 
 import asyncio
@@ -33,10 +33,10 @@ import httpx
 import traceback
 import socket
 import os
+import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
+from collections import deque
 import logging
 
 # Set up logging
@@ -56,12 +56,6 @@ class ConversationApp:
     """Conversation application with speech event integration."""
     
     def __init__(self):
-        self.mcp_session = None
-        self.read_stream = None
-        self.write_stream = None
-        self.client_context = None
-        self.stdio_context = None
-        self.mcp_tools = []
         self.messages = []
         
         # Load the system prompt
@@ -75,77 +69,22 @@ class ConversationApp:
         self.is_speaking = False
         self.current_speech_event = None
         self.processing_speech = False
+        
+        # Queues for parsed content
+        self.speech_queue = deque()  # Queue of speech items (text in quotes)
+        self.action_queue = deque()  # Queue of action items (text in **)
+        
+        # Parser state for streaming
+        self.current_quote = ""
+        self.current_action = ""
+        self.in_quote = False
+        self.in_action = False
+        self._star_count = 0
 
-    async def initialize_mcp(self):
-        """Initialize MCP client and load tools from mcp.json."""
+    async def initialize(self):
+        """Initialize the application."""
         logger.info("=" * 70)
-        logger.info("Initializing MCP Client")
-        logger.info("=" * 70)
-        
-        # Load mcp.json configuration
-        mcp_config_path = Path(__file__).parent / "mcp.json"
-        with open(mcp_config_path, 'r') as f:
-            mcp_config = json.load(f)
-        
-        server_config = mcp_config["mcpServers"]["reachy-mini"]
-        
-        logger.info(f"Server configuration:")
-        logger.info(f"   Command: {server_config['command']}")
-        logger.info(f"   Args: {server_config['args']}")
-        
-        # Merge environment variables: mcp.json config + current environment
-        env_vars = server_config.get('env', {}).copy()
-        
-        # Pass through important environment variables from current process
-        if 'REACHY_BASE_URL' in os.environ:
-            env_vars['REACHY_BASE_URL'] = os.environ['REACHY_BASE_URL']
-            logger.info(f"   Passing REACHY_BASE_URL: {env_vars['REACHY_BASE_URL']}")
-        
-        if 'PIPER_MODEL' in os.environ:
-            env_vars['PIPER_MODEL'] = os.environ['PIPER_MODEL']
-        
-        if 'AUDIO_DEVICE' in os.environ:
-            env_vars['AUDIO_DEVICE'] = os.environ['AUDIO_DEVICE']
-        
-        for key, value in env_vars.items():
-            logger.info(f"      {key}: {value}")
-        
-        # Initialize MCP client
-        logger.info("Starting MCP server...")
-        server_params = StdioServerParameters(
-            command=server_config["command"],
-            args=server_config["args"],
-            env=env_vars
-        )
-        
-        # Store contexts for later cleanup
-        self.stdio_context = stdio_client(server_params)
-        self.read_stream, self.write_stream = await self.stdio_context.__aenter__()
-        
-        self.client_context = ClientSession(self.read_stream, self.write_stream)
-        self.mcp_session = await self.client_context.__aenter__()
-        
-        # Initialize the session
-        await self.mcp_session.initialize()
-        logger.info("   ✓ MCP session initialized")
-        
-        # List available tools
-        logger.info("Loading available tools...")
-        tools_result = await self.mcp_session.list_tools()
-        
-        logger.info(f"   Found {len(tools_result.tools)} tool(s):")
-        for tool in tools_result.tools:
-            logger.info(f"   - {tool.name}")
-            
-            # Convert MCP tool to OpenAI tool format
-            openai_tool = self._convert_mcp_tool_to_openai(tool)
-            self.mcp_tools.append({
-                "mcp_tool": tool,
-                "openai_tool": openai_tool
-            })
-        
-        logger.info("=" * 70)
-        logger.info(f"✓ MCP Client ready with {len(self.mcp_tools)} tools")
+        logger.info("Initializing Conversation App")
         logger.info("=" * 70)
         
         # Initialize conversation with system prompt
@@ -153,20 +92,8 @@ class ConversationApp:
             {"role": "system", "content": self.system_prompt}
         ]
         
-    def _convert_mcp_tool_to_openai(self, mcp_tool) -> Dict[str, Any]:
-        """Convert MCP tool definition to OpenAI tool format."""
-        return {
-            "type": "function",
-            "function": {
-                "name": mcp_tool.name,
-                "description": mcp_tool.description,
-                "parameters": mcp_tool.inputSchema if mcp_tool.inputSchema else {
-                    "type": "object",
-                    "properties": {},
-                    "additionalProperties": False
-                }
-            }
-        }
+        logger.info("✓ App initialized")
+        logger.info("=" * 70)
     
     async def connect_to_hearing_service(self):
         """Connect to the hearing event emitter via Unix Domain Socket."""
@@ -375,190 +302,107 @@ class ConversationApp:
         
         logger.info(f"🤖 Reachy: {response}")
     
-    def _clean_tool_arguments(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """Clean tool arguments to handle LLM output quirks."""
-        cleaned = {}
-        for key, value in arguments.items():
-            # Handle string "null" - omit entirely for optional parameters
-            if value == "null" or value == "None":
-                continue
-            elif value == "true":
-                cleaned[key] = True
-            elif value == "false":
-                cleaned[key] = False
+    def parse_token(self, token: str):
+        """
+        Parse a token from the streaming response.
+        Extracts quotes "..." as speech and **...** as actions.
+        """
+        for char in token:
+            # Handle quote parsing
+            if char == '"':
+                if self.in_quote:
+                    # End of quote - add to speech queue
+                    if self.current_quote:
+                        self.speech_queue.append(self.current_quote)
+                        logger.info(f'� Speech: "{self.current_quote}"')
+                    self.current_quote = ""
+                    self.in_quote = False
+                else:
+                    # Start of quote
+                    self.in_quote = True
+            elif self.in_quote:
+                self.current_quote += char
+            
+            # Handle action parsing (skip if inside quote)
+            elif char == '*':
+                if not hasattr(self, '_star_count'):
+                    self._star_count = 0
+                    
+                self._star_count += 1
+                
+                if self.in_action:
+                    # We're inside an action
+                    if self._star_count == 2:
+                        # Found closing **, end the action
+                        if self.current_action:
+                            self.action_queue.append(self.current_action)
+                            logger.info(f'⚡ Action: **{self.current_action}**')
+                        self.current_action = ""
+                        self.in_action = False
+                        self._star_count = 0
+                else:
+                    # Not in action yet
+                    if self._star_count == 2:
+                        # Found opening **, start action
+                        self.in_action = True
+                        self._star_count = 0
             else:
-                cleaned[key] = value
-        
-        return cleaned
+                # Reset star count if we see a non-star character
+                if hasattr(self, '_star_count'):
+                    self._star_count = 0
+                    
+                if self.in_action:
+                    self.current_action += char
     
-    async def execute_tool_via_mcp(self, tool_name: str, arguments: Dict[str, Any]) -> Any:
-        """Execute a tool via MCP server with argument cleaning."""
-        logger.info(f"🔧 Executing tool: {tool_name}")
-        
-        # Clean arguments to handle LLM pythonic tool calling quirks
-        cleaned_arguments = self._clean_tool_arguments(arguments)
-        
-        # Show cleaning if arguments were modified
-        if cleaned_arguments != arguments:
-            logger.debug(f"   Original args: {arguments}")
-            logger.debug(f"   Cleaned args: {cleaned_arguments}")
-        
-        try:
-            result = await self.mcp_session.call_tool(tool_name, cleaned_arguments)
-            logger.info(f"   ✓ Tool executed successfully")
-            return result
-        except Exception as e:
-            error_msg = f"Error executing tool {tool_name}: {str(e)}"
-            logger.error(f"   ✗ {error_msg}")
-            return {"error": error_msg}
-    
-    async def chat_completion(
+    async def chat_completion_stream(
         self,
         messages: List[Dict[str, Any]],
-        tools: List[Dict[str, Any]] = None,
         max_tokens: int = 3000
-    ) -> Dict[str, Any]:
-        """Make a chat completion request with tool calling support."""
+    ):
+        """Make a streaming chat completion request."""
         payload = {
             "model": MODEL_NAME,
             "messages": messages,
             "max_tokens": max_tokens,
-            "temperature": 0.3
+            "temperature": 0.3,
+            "stream": True
         }
-        
-        if tools:
-            payload["tools"] = tools
-            payload["tool_choice"] = "auto"
-            payload["parallel_tool_calls"] = False
         
         async with httpx.AsyncClient(timeout=60.0) as client:
             try:
-                response = await client.post(CHAT_COMPLETIONS_URL, json=payload)
-                response.raise_for_status()
-                return response.json()
+                async with client.stream("POST", CHAT_COMPLETIONS_URL, json=payload) as response:
+                    response.raise_for_status()
+                    
+                    async for line in response.aiter_lines():
+                        if line.startswith("data: "):
+                            data_str = line[6:]  # Remove "data: " prefix
+                            
+                            if data_str == "[DONE]":
+                                break
+                            
+                            try:
+                                data = json.loads(data_str)
+                                choices = data.get("choices", [])
+                                
+                                if choices:
+                                    delta = choices[0].get("delta", {})
+                                    content = delta.get("content", "")
+                                    
+                                    if content:
+                                        # Parse the token for quotes and actions
+                                        self.parse_token(content)
+                                        yield content
+                                        
+                            except json.JSONDecodeError:
+                                continue
+                                
             except httpx.HTTPStatusError as e:
                 logger.error(f"HTTP error: {e}")
                 logger.error(f"Response: {e.response.text}")
                 raise
             except Exception as e:
-                logger.error(f"Error during chat completion: {e}")
+                logger.error(f"Error during streaming chat completion: {e}")
                 raise
-    
-    def _fix_double_encoded_params(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Fix double-encoded JSON parameters.
-        
-        Some LLMs (especially Llama models) double-encode complex parameters by 
-        converting arrays/objects to JSON strings. This function recursively parses
-        any string values that look like JSON.
-        
-        Example:
-        {"commands": "[{...}]"}  ->  {"commands": [{...}]}
-        """
-        if not isinstance(params, dict):
-            return params
-            
-        fixed = {}
-        for key, value in params.items():
-            if isinstance(value, str):
-                # Check if the string looks like JSON (starts with [ or {)
-                stripped = value.strip()
-                if (stripped.startswith('[') and stripped.endswith(']')) or \
-                   (stripped.startswith('{') and stripped.endswith('}')):
-                    try:
-                        # Try to parse as JSON
-                        parsed = json.loads(stripped)
-                        fixed[key] = self._fix_double_encoded_params(parsed) if isinstance(parsed, dict) else parsed
-                    except json.JSONDecodeError:
-                        # If parsing fails, keep as string
-                        fixed[key] = value
-                else:
-                    fixed[key] = value
-            elif isinstance(value, dict):
-                # Recursively fix nested dicts
-                fixed[key] = self._fix_double_encoded_params(value)
-            else:
-                fixed[key] = value
-        
-        return fixed
-    
-    def _parse_tool_call_from_content(self, content: str) -> Optional[Dict[str, Any]]:
-        """
-        Parse a tool call from JSON content (Llama3 fallback format).
-        
-        vLLM with --tool-call-parser llama3_json will sometimes put tool calls
-        in the content as JSON when the model uses native Llama format instead of
-        using the tool_calls structure. This function detects and parses that format.
-        
-        This version robustly extracts the JSON by finding the first '{' and last '}'
-        to strip away any leading/trailing text or artifacts.
-        """
-        if not content or not content.strip():
-            return None
-        
-        logger.debug("Attempting to parse tool call from content...")
-        
-        # Find the first '{' and the last '}'
-        start_index = content.find('{')
-        end_index = content.rfind('}')
-        
-        if start_index == -1 or end_index == -1 or end_index < start_index:
-            logger.debug("  No JSON object markers found in content")
-            return None
-        
-        # Extract the potential JSON string
-        json_str = content[start_index : end_index + 1]
-        logger.debug(f"  Extracted JSON: {json_str[:200]}...")
-        
-        # Try to parse the extracted string as JSON
-        try:
-            parsed = json.loads(json_str)
-            
-            # Check if it looks like a tool call
-            if isinstance(parsed, dict) and "name" in parsed:
-                # Extract function name and parameters
-                func_name = parsed.get("name")
-                parameters = parsed.get("parameters", {})
-                
-                # Fix double-encoded JSON strings in parameters (common with Llama models)
-                parameters = self._fix_double_encoded_params(parameters)
-                
-                # Validate it's a known tool
-                known_tools = [tool["mcp_tool"].name for tool in self.mcp_tools]
-                if func_name in known_tools:
-                    logger.info(f"  ✓ Successfully parsed tool call from content: {func_name}")
-                    return {
-                        "name": func_name,
-                        "arguments": parameters
-                    }
-                else:
-                    logger.debug(f"  Parsed JSON, but func_name '{func_name}' not in known tools")
-            else:
-                logger.debug("  Parsed JSON, but it's not a valid tool call structure")
-                
-        except json.JSONDecodeError as e:
-            # Try adding closing brace and parsing again
-            try:
-                parsed = json.loads(json_str + '}')
-                if isinstance(parsed, dict) and "name" in parsed:
-                    func_name = parsed.get("name")
-                    parameters = parsed.get("parameters", {})
-                    parameters = self._fix_double_encoded_params(parameters)
-                    
-                    known_tools = [tool["mcp_tool"].name for tool in self.mcp_tools]
-                    if func_name in known_tools:
-                        logger.info(f"  ✓ Successfully parsed tool call after adding closing brace: {func_name}")
-                        return {
-                            "name": func_name,
-                            "arguments": parameters
-                        }
-            except json.JSONDecodeError:
-                pass
-            
-            logger.debug(f"  Failed to parse extracted JSON string: {e}")
-            logger.debug(f"  Extracted string: {json_str[:150]}...")
-        
-        return None
     
     async def process_message(self, user_message: str) -> str:
         """Process a user message and return the assistant's response."""
@@ -567,176 +411,28 @@ class ConversationApp:
        
         logger.debug(f"Current history: {len(self.messages)} messages")
 
-        # Get OpenAI-formatted tools
-        openai_tools = [tool_dict["openai_tool"] for tool_dict in self.mcp_tools]
+        # Reset parser state
+        self.current_quote = ""
+        self.current_action = ""
+        self.in_quote = False
+        self.in_action = False
+        self._star_count = 0
         
-        max_iterations = 10
-        iteration = 0
-        final_response = None
+        # Collect full response
+        full_response = ""
         
-        while iteration < max_iterations:
-            iteration += 1
-            
-            # Make chat completion request
-            response = await self.chat_completion(
-                messages=self.messages,
-                tools=openai_tools
-            )
-            
-            # Get the assistant's message
-            choice = response["choices"][0]
-            assistant_message = choice["message"]
-            finish_reason = choice["finish_reason"]
-            
-            # Debug: Print what we got back
-            logger.info(f"\n[Iteration {iteration}]")
-            logger.info(f"  finish_reason: {finish_reason}")
-            logger.info(f"  has content: {'content' in assistant_message and assistant_message['content'] is not None}")
-            logger.info(f"  'tool_calls' key exists: {'tool_calls' in assistant_message}")
-            logger.info(f"  tool_calls is truthy: {bool(assistant_message.get('tool_calls'))}")
-            
-            # Show content if present
-            if assistant_message.get("content"):
-                content_preview = assistant_message['content'][:200]
-                logger.info(f"  content preview: {content_preview}...")
-            
-            # Show tool calls if present
-            if assistant_message.get("tool_calls"):
-                logger.info(f"  tool_calls count: {len(assistant_message['tool_calls'])}")
-                for tc in assistant_message['tool_calls']:
-                    func = tc.get('function', {})
-                    logger.info(f"    - Function: {func.get('name')}")
-                    args_preview = str(func.get('arguments', ''))[:100]
-                    logger.info(f"      Args preview: {args_preview}")
-            else:
-                logger.debug(f"  tool_calls is empty or None")
-            
-            # Clean up empty tool_calls array before adding to conversation
-            if "tool_calls" in assistant_message and not assistant_message["tool_calls"]:
-                del assistant_message["tool_calls"]
-            
-            # Add assistant message to conversation
-            self.messages.append(assistant_message)
-            
-            # Check if we have a text response
-            content_str = assistant_message.get("content", "")
-            if content_str:
-                final_response = content_str
-            
-            # Check if content contains a JSON tool call (Llama fallback format)
-            parsed_tool_call = None
-            if content_str and not assistant_message.get("tool_calls"):
-                parsed_tool_call = self._parse_tool_call_from_content(content_str)
-                if parsed_tool_call:
-                    logger.info(f"✓ Detected JSON tool call in content (Llama fallback format)")
-                    logger.info(f"   Function: {parsed_tool_call['name']}")
-                    logger.info(f"   Arguments (after fixing double-encoding): {json.dumps(parsed_tool_call['arguments'], indent=2)}")
-            
-            # Handle tool calls FIRST (prioritize structured tool_calls, then JSON in content)
-            if "tool_calls" in assistant_message and assistant_message["tool_calls"]:
-                # Model made proper structured tool calls
-                logger.info(f"\n✓ Processing structured tool calls")
-                # Don't break here - continue to tool call processing below
-            elif parsed_tool_call:
-                # Model output tool call as JSON in content - convert to tool_call format
-                logger.info(f"\n✓ Converting JSON content to tool call format")
-                
-                # Create a synthetic tool_call structure
-                # NOTE: arguments must be a JSON string, not a dict
-                synthetic_tool_call = {
-                    "id": f"call_{iteration}",  # Generate a simple ID
-                    "function": {
-                        "name": parsed_tool_call["name"],
-                        "arguments": json.dumps(parsed_tool_call["arguments"])  # Convert dict to JSON string
-                    },
-                    "type": "function"
-                }
-                
-                # Add it to the assistant message for processing
-                if "tool_calls" not in assistant_message:
-                    assistant_message["tool_calls"] = []
-                assistant_message["tool_calls"].append(synthetic_tool_call)
-                
-                # Update the message in conversation history
-                self.messages[-1] = assistant_message
-                
-                # Clear final_response so we don't treat this as a text response
-                final_response = None
-                # Don't break here - continue to tool call processing below
-            
-            # Handle tool calls (both structured and converted from JSON)
-            if "tool_calls" in assistant_message and assistant_message["tool_calls"]:
-                logger.info(f"🛠️  Processing {len(assistant_message['tool_calls'])} tool call(s)")
-                
-                # Execute each tool call
-                for tool_call in assistant_message["tool_calls"]:
-                    tool_call_id = tool_call.get("id")
-                    function = tool_call.get("function", {})
-                    tool_name = function.get("name")
-                    tool_args_str = function.get("arguments", "{}")
-                    
-                    # Parse arguments
-                    try:
-                        if isinstance(tool_args_str, str):
-                            tool_args = json.loads(tool_args_str)
-                        elif isinstance(tool_args_str, dict):
-                            tool_args = tool_args_str
-                        else:
-                            tool_args = {}
-                    except json.JSONDecodeError as e:
-                        logger.warning(f"   ⚠️  Failed to parse arguments: {e}")
-                        logger.warning(f"      Raw arguments: {tool_args_str}")
-                        tool_args = {}
-                    
-                    # Execute tool
-                    result = await self.execute_tool_via_mcp(tool_name, tool_args)
-                    
-                    # Format tool result
-                    tool_result_content = json.dumps(result.content[0].text if hasattr(result, 'content') else str(result))
-                    
-                    # Add tool result to conversation
-                    tool_result_message = {
-                        "role": "tool",
-                        "tool_call_id": tool_call_id,
-                        "name": tool_name,  # Important: include tool name
-                        "content": tool_result_content
-                    }
-                    self.messages.append(tool_result_message)
-                
-                # Continue loop to get next response
-                continue
-                
-            elif final_response:
-                # We have a text response and no tool calls
-                # Check if this is after tool execution
-                if finish_reason == "stop":
-                    # Check if the previous messages contain tool results
-                    has_recent_tool_results = False
-                    for msg in reversed(self.messages[-5:]):  # Check last 5 messages
-                        if msg.get("role") == "tool":
-                            has_recent_tool_results = True
-                            break
-                    
-                    if has_recent_tool_results:
-                        # This is the final response after tool execution
-                        logger.info("✓ Model provided final response after tool execution")
-                    
-                    logger.info("✓ Conversation turn complete")
-                    return final_response
-                
-            elif finish_reason == "stop":
-                # No content and stop reason - return empty or final
-                return final_response or "(No response)"
-            
-            # Check if response was truncated
-            if finish_reason == "length":
-                if not final_response:
-                    final_response = "(Response truncated due to length limit)"
-                return final_response
-            
-            # Continue to next iteration
-            
-        return final_response or "(No response generated)"
+        logger.info("🤖 Processing response...")
+        
+        # Stream the response
+        async for token in self.chat_completion_stream(messages=self.messages):
+            full_response += token
+        
+        # Add assistant response to conversation history
+        self.messages.append({"role": "assistant", "content": full_response})
+        
+        logger.info(f"✓ Response complete ({len(self.speech_queue)} speech items, {len(self.action_queue)} action items)")
+        
+        return full_response
     
     async def run(self):
         """Run the conversation application."""
@@ -747,8 +443,8 @@ class ConversationApp:
         logger.info("This app will:")
         logger.info("  1. Connect to hearing event emitter")
         logger.info("  2. Listen for speech events")
-        logger.info("  3. Process speech through vLLM chat")
-        logger.info("  4. Control robot via MCP tools")
+        logger.info("  3. Process speech through vLLM streaming chat")
+        logger.info("  4. Parse responses into quotes and actions")
         logger.info("=" * 70)
         logger.info("")
         
@@ -777,11 +473,6 @@ class ConversationApp:
             except:
                 pass
         
-        if self.client_context:
-            await self.client_context.__aexit__(None, None, None)
-        if self.stdio_context:
-            await self.stdio_context.__aexit__(None, None, None)
-        
         logger.info("   ✓ Cleanup complete")
 
 
@@ -793,7 +484,6 @@ async def main():
     logger.info("")
     logger.info("Make sure:")
     logger.info("  - Hearing event emitter is running")
-    logger.info("  - Reachy Mini daemon is running")
     logger.info("  - vLLM server is running on http://localhost:8100")
     logger.info("=" * 70)
     logger.info("")
@@ -801,8 +491,8 @@ async def main():
     app = ConversationApp()
     
     try:
-        # Initialize MCP
-        await app.initialize_mcp()
+        # Initialize app
+        await app.initialize()
         
         # Run conversation app
         await app.run()
