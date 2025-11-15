@@ -444,6 +444,32 @@ class ConversationApp:
                 logger.error(f"Error during chat completion: {e}")
                 raise
     
+    def _parse_tool_call_from_content(self, content: str) -> Optional[Dict[str, Any]]:
+        """
+        Parse a tool call from JSON content (Llama3 fallback format).
+        
+        vLLM with --tool-call-parser llama3_json will sometimes put tool calls
+        in the content as JSON when the model uses native Llama format instead of
+        using the tool_calls structure. This function detects and parses that format.
+        """
+        if not content:
+            return None
+        
+        # Try to parse entire content as JSON
+        try:
+            data = json.loads(content.strip())
+            
+            # Check for function call format: {"name": "...", "arguments": {...}}
+            if isinstance(data, dict) and "name" in data and "arguments" in data:
+                return {
+                    "name": data["name"],
+                    "arguments": data["arguments"]
+                }
+        except json.JSONDecodeError:
+            pass
+        
+        return None
+    
     async def process_message(self, user_message: str) -> str:
         """Process a user message and return the assistant's response."""
         # Add user message to conversation
@@ -472,9 +498,30 @@ class ConversationApp:
             assistant_message = choice["message"]
             finish_reason = choice["finish_reason"]
             
-            logger.debug(f"Iteration {iteration}: finish_reason={finish_reason}")
+            # Debug: Print what we got back
+            logger.info(f"\n[Iteration {iteration}]")
+            logger.info(f"  finish_reason: {finish_reason}")
+            logger.info(f"  has content: {'content' in assistant_message and assistant_message['content'] is not None}")
+            logger.info(f"  'tool_calls' key exists: {'tool_calls' in assistant_message}")
+            logger.info(f"  tool_calls is truthy: {bool(assistant_message.get('tool_calls'))}")
             
-            # Clean up empty tool_calls array
+            # Show content if present
+            if assistant_message.get("content"):
+                content_preview = assistant_message['content'][:200]
+                logger.info(f"  content preview: {content_preview}...")
+            
+            # Show tool calls if present
+            if assistant_message.get("tool_calls"):
+                logger.info(f"  tool_calls count: {len(assistant_message['tool_calls'])}")
+                for tc in assistant_message['tool_calls']:
+                    func = tc.get('function', {})
+                    logger.info(f"    - Function: {func.get('name')}")
+                    args_preview = str(func.get('arguments', ''))[:100]
+                    logger.info(f"      Args preview: {args_preview}")
+            else:
+                logger.debug(f"  tool_calls is empty or None")
+            
+            # Clean up empty tool_calls array before adding to conversation
             if "tool_calls" in assistant_message and not assistant_message["tool_calls"]:
                 del assistant_message["tool_calls"]
             
@@ -486,29 +533,83 @@ class ConversationApp:
             if content_str:
                 final_response = content_str
             
-            # Handle tool calls
+            # Check if content contains a JSON tool call (Llama fallback format)
+            parsed_tool_call = None
+            if content_str and not assistant_message.get("tool_calls"):
+                parsed_tool_call = self._parse_tool_call_from_content(content_str)
+                if parsed_tool_call:
+                    logger.info(f"\n✓ Detected JSON tool call in content (Llama fallback format)")
+                    logger.info(f"   Function: {parsed_tool_call['name']}")
+                    logger.info(f"   Arguments: {json.dumps(parsed_tool_call['arguments'], indent=2)}")
+            
+            # Handle tool calls FIRST (prioritize structured tool_calls, then JSON in content)
+            if "tool_calls" in assistant_message and assistant_message["tool_calls"]:
+                # Model made proper structured tool calls
+                logger.info(f"\n✓ Processing structured tool calls")
+                # Don't break here - continue to tool call processing below
+            elif parsed_tool_call:
+                # Model output tool call as JSON in content - convert to tool_call format
+                logger.info(f"\n✓ Converting JSON content to tool call format")
+                
+                # Create a synthetic tool_call structure
+                # NOTE: arguments must be a JSON string, not a dict
+                synthetic_tool_call = {
+                    "id": f"call_{iteration}",  # Generate a simple ID
+                    "function": {
+                        "name": parsed_tool_call["name"],
+                        "arguments": json.dumps(parsed_tool_call["arguments"])  # Convert dict to JSON string
+                    },
+                    "type": "function"
+                }
+                
+                # Add it to the assistant message for processing
+                if "tool_calls" not in assistant_message:
+                    assistant_message["tool_calls"] = []
+                assistant_message["tool_calls"].append(synthetic_tool_call)
+                
+                # Update the message in conversation history
+                self.messages[-1] = assistant_message
+                
+                # Clear final_response so we don't treat this as a text response
+                final_response = None
+                # Don't break here - continue to tool call processing below
+            
+            # Handle tool calls (both structured and converted from JSON)
             if "tool_calls" in assistant_message and assistant_message["tool_calls"]:
                 logger.info(f"🛠️  Processing {len(assistant_message['tool_calls'])} tool call(s)")
                 
                 # Execute each tool call
                 for tool_call in assistant_message["tool_calls"]:
-                    tool_name = tool_call["function"]["name"]
-                    tool_args_str = tool_call["function"]["arguments"]
+                    tool_call_id = tool_call.get("id")
+                    function = tool_call.get("function", {})
+                    tool_name = function.get("name")
+                    tool_args_str = function.get("arguments", "{}")
                     
                     # Parse arguments
                     try:
-                        tool_args = json.loads(tool_args_str) if isinstance(tool_args_str, str) else tool_args_str
-                    except json.JSONDecodeError:
+                        if isinstance(tool_args_str, str):
+                            tool_args = json.loads(tool_args_str)
+                        elif isinstance(tool_args_str, dict):
+                            tool_args = tool_args_str
+                        else:
+                            tool_args = {}
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"   ⚠️  Failed to parse arguments: {e}")
+                        logger.warning(f"      Raw arguments: {tool_args_str}")
                         tool_args = {}
                     
                     # Execute tool
                     result = await self.execute_tool_via_mcp(tool_name, tool_args)
                     
+                    # Format tool result
+                    tool_result_content = json.dumps(result.content[0].text if hasattr(result, 'content') else str(result))
+                    
                     # Add tool result to conversation
                     tool_result_message = {
                         "role": "tool",
-                        "tool_call_id": tool_call["id"],
-                        "content": json.dumps(result.content[0].text if hasattr(result, 'content') else str(result))
+                        "tool_call_id": tool_call_id,
+                        "name": tool_name,  # Important: include tool name
+                        "content": tool_result_content
                     }
                     self.messages.append(tool_result_message)
                 
@@ -516,13 +617,32 @@ class ConversationApp:
                 continue
                 
             elif final_response:
-                # We have a text response and no tool calls, we're done
-                logger.info("✓ Conversation turn complete")
-                return final_response
+                # We have a text response and no tool calls
+                # Check if this is after tool execution
+                if finish_reason == "stop":
+                    # Check if the previous messages contain tool results
+                    has_recent_tool_results = False
+                    for msg in reversed(self.messages[-5:]):  # Check last 5 messages
+                        if msg.get("role") == "tool":
+                            has_recent_tool_results = True
+                            break
+                    
+                    if has_recent_tool_results:
+                        # This is the final response after tool execution
+                        logger.info("✓ Model provided final response after tool execution")
+                    
+                    logger.info("✓ Conversation turn complete")
+                    return final_response
                 
             elif finish_reason == "stop":
                 # No content and stop reason - return empty or final
                 return final_response or "(No response)"
+            
+            # Check if response was truncated
+            if finish_reason == "length":
+                if not final_response:
+                    final_response = "(Response truncated due to length limit)"
+                return final_response
             
             # Continue to next iteration
             
