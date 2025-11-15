@@ -444,6 +444,44 @@ class ConversationApp:
                 logger.error(f"Error during chat completion: {e}")
                 raise
     
+    def _fix_double_encoded_params(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Fix double-encoded JSON parameters.
+        
+        Some LLMs (especially Llama models) double-encode complex parameters by 
+        converting arrays/objects to JSON strings. This function recursively parses
+        any string values that look like JSON.
+        
+        Example:
+        {"commands": "[{...}]"}  ->  {"commands": [{...}]}
+        """
+        if not isinstance(params, dict):
+            return params
+            
+        fixed = {}
+        for key, value in params.items():
+            if isinstance(value, str):
+                # Check if the string looks like JSON (starts with [ or {)
+                stripped = value.strip()
+                if (stripped.startswith('[') and stripped.endswith(']')) or \
+                   (stripped.startswith('{') and stripped.endswith('}')):
+                    try:
+                        # Try to parse as JSON
+                        parsed = json.loads(stripped)
+                        fixed[key] = self._fix_double_encoded_params(parsed) if isinstance(parsed, dict) else parsed
+                    except json.JSONDecodeError:
+                        # If parsing fails, keep as string
+                        fixed[key] = value
+                else:
+                    fixed[key] = value
+            elif isinstance(value, dict):
+                # Recursively fix nested dicts
+                fixed[key] = self._fix_double_encoded_params(value)
+            else:
+                fixed[key] = value
+        
+        return fixed
+    
     def _parse_tool_call_from_content(self, content: str) -> Optional[Dict[str, Any]]:
         """
         Parse a tool call from JSON content (Llama3 fallback format).
@@ -451,22 +489,74 @@ class ConversationApp:
         vLLM with --tool-call-parser llama3_json will sometimes put tool calls
         in the content as JSON when the model uses native Llama format instead of
         using the tool_calls structure. This function detects and parses that format.
+        
+        This version robustly extracts the JSON by finding the first '{' and last '}'
+        to strip away any leading/trailing text or artifacts.
         """
-        if not content:
+        if not content or not content.strip():
             return None
         
-        # Try to parse entire content as JSON
+        logger.debug("Attempting to parse tool call from content...")
+        
+        # Find the first '{' and the last '}'
+        start_index = content.find('{')
+        end_index = content.rfind('}')
+        
+        if start_index == -1 or end_index == -1 or end_index < start_index:
+            logger.debug("  No JSON object markers found in content")
+            return None
+        
+        # Extract the potential JSON string
+        json_str = content[start_index : end_index + 1]
+        logger.debug(f"  Extracted JSON: {json_str[:200]}...")
+        
+        # Try to parse the extracted string as JSON
         try:
-            data = json.loads(content.strip())
+            parsed = json.loads(json_str)
             
-            # Check for function call format: {"name": "...", "arguments": {...}}
-            if isinstance(data, dict) and "name" in data and "arguments" in data:
-                return {
-                    "name": data["name"],
-                    "arguments": data["arguments"]
-                }
-        except json.JSONDecodeError:
-            pass
+            # Check if it looks like a tool call
+            if isinstance(parsed, dict) and "name" in parsed:
+                # Extract function name and parameters
+                func_name = parsed.get("name")
+                parameters = parsed.get("parameters", {})
+                
+                # Fix double-encoded JSON strings in parameters (common with Llama models)
+                parameters = self._fix_double_encoded_params(parameters)
+                
+                # Validate it's a known tool
+                known_tools = [tool["mcp_tool"].name for tool in self.mcp_tools]
+                if func_name in known_tools:
+                    logger.info(f"  ✓ Successfully parsed tool call from content: {func_name}")
+                    return {
+                        "name": func_name,
+                        "arguments": parameters
+                    }
+                else:
+                    logger.debug(f"  Parsed JSON, but func_name '{func_name}' not in known tools")
+            else:
+                logger.debug("  Parsed JSON, but it's not a valid tool call structure")
+                
+        except json.JSONDecodeError as e:
+            # Try adding closing brace and parsing again
+            try:
+                parsed = json.loads(json_str + '}')
+                if isinstance(parsed, dict) and "name" in parsed:
+                    func_name = parsed.get("name")
+                    parameters = parsed.get("parameters", {})
+                    parameters = self._fix_double_encoded_params(parameters)
+                    
+                    known_tools = [tool["mcp_tool"].name for tool in self.mcp_tools]
+                    if func_name in known_tools:
+                        logger.info(f"  ✓ Successfully parsed tool call after adding closing brace: {func_name}")
+                        return {
+                            "name": func_name,
+                            "arguments": parameters
+                        }
+            except json.JSONDecodeError:
+                pass
+            
+            logger.debug(f"  Failed to parse extracted JSON string: {e}")
+            logger.debug(f"  Extracted string: {json_str[:150]}...")
         
         return None
     
@@ -538,9 +628,9 @@ class ConversationApp:
             if content_str and not assistant_message.get("tool_calls"):
                 parsed_tool_call = self._parse_tool_call_from_content(content_str)
                 if parsed_tool_call:
-                    logger.info(f"\n✓ Detected JSON tool call in content (Llama fallback format)")
+                    logger.info(f"✓ Detected JSON tool call in content (Llama fallback format)")
                     logger.info(f"   Function: {parsed_tool_call['name']}")
-                    logger.info(f"   Arguments: {json.dumps(parsed_tool_call['arguments'], indent=2)}")
+                    logger.info(f"   Arguments (after fixing double-encoding): {json.dumps(parsed_tool_call['arguments'], indent=2)}")
             
             # Handle tool calls FIRST (prioritize structured tool_calls, then JSON in content)
             if "tool_calls" in assistant_message and assistant_message["tool_calls"]:
