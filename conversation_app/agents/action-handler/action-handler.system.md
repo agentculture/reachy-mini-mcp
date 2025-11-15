@@ -56,7 +56,7 @@ Move your antennas - it's fun!
 Would you like to hear a story"?
 
 #### Response
-{ name: "operate_robot", commands: [{"tool_name": "nod_head", "parameters": {"speech": "Yes, please."}}, {"tool_name": "express_emotion", "parameters": {"emotion": "curious", "speech": "I wonder what will it be about!"}} ] }
+{ "name": "operate_robot", "commands": [{"tool_name": "nod_head", "parameters": {"speech": "Yes, please."}}, {"tool_name": "express_emotion", "parameters": {"emotion": "curious", "speech": "I wonder what will it be about!"}} ] }
 
 
 Start your reply with {
