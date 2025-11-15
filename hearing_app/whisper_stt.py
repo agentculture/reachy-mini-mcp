@@ -24,7 +24,7 @@ class WhisperSTT:
         self,
         model_size: str = "base",
         device: str = "cpu",
-        compute_type: str = "float16",
+        compute_type: str = "int8",
         language: str = "en"
     ):
         """
@@ -38,6 +38,12 @@ class WhisperSTT:
         """
         self.model_size = model_size
         self.device = device
+        
+        # Force int8 for CPU to avoid SGEMM backend issues
+        if device == "cpu" and compute_type == "float16":
+            logger.warning("float16 not supported on CPU, switching to int8")
+            compute_type = "int8"
+        
         self.compute_type = compute_type
         self.language = language
         

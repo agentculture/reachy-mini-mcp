@@ -24,6 +24,7 @@ from dotenv import load_dotenv
 import asyncio
 from collections import deque
 from pathlib import Path
+import torch
 
 # Import our custom modules
 from vad_detector import VADDetector
@@ -85,8 +86,21 @@ class HearingEventEmitter:
         
         # Whisper STT configuration
         whisper_model_size = os.getenv('WHISPER_MODEL_SIZE', 'base')
-        whisper_device = os.getenv('WHISPER_DEVICE', 'cpu')
-        whisper_compute_type = os.getenv('WHISPER_COMPUTE_TYPE', 'float32')
+        
+        # Auto-detect CUDA availability
+        cuda_available = torch.cuda.is_available()
+        default_device = 'cuda' if cuda_available else 'cpu'
+        whisper_device = os.getenv('WHISPER_DEVICE', default_device)
+        
+        # Set compute_type based on device
+        if whisper_device == 'cuda':
+            default_compute_type = 'float16'
+        else:
+            default_compute_type = 'int8'
+        whisper_compute_type = os.getenv('WHISPER_COMPUTE_TYPE', default_compute_type)
+        
+        logger.info(f"CUDA available: {cuda_available}")
+        logger.info(f"Whisper will use device: {whisper_device} with compute_type: {whisper_compute_type}")
         
         self.whisper = WhisperSTT(
             model_size=whisper_model_size,
@@ -339,7 +353,7 @@ class HearingEventEmitter:
         if self.speech_detected:
             if self.silence_start_time is None:
                 self.silence_start_time = time.time()
-                logger.debug("Silence detected, starting silence timer")
+                logger.info("Silence detected, starting silence timer")
             elif time.time() - self.silence_start_time >= self.min_silence_duration:
                 logger.info("Silence duration exceeded, starting post-speech collection")
                 # Start collecting post-speech audio

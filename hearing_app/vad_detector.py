@@ -44,7 +44,9 @@ class VADDetector:
             True if speech is detected, False otherwise
         """
         try:
-            return self.vad.is_speech(audio_data, self.sample_rate)
+            result = self.vad.is_speech(audio_data, self.sample_rate)
+            #logger.debug(f"VAD result: {'SPEECH' if result else 'SILENCE'}")
+            return result
         except Exception as e:
             logger.error(f"Error in VAD processing: {e}")
             return False
