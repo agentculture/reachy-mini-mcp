@@ -129,7 +129,7 @@ services:
     command: >
       sh -c "
       pip install --no-cache-dir -q httpx mcp &&
-      python3 -m conversation_app.app
+      python3 conversation_app.py
       "
     depends_on:
       reachy-daemon:
@@ -139,7 +139,7 @@ services:
       vllm-server:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "pgrep", "-f", "conversation_app.app"]
+      test: ["CMD", "pgrep", "-f", "conversation_app.py"]
       interval: 10s
       timeout: 5s
       retries: 3

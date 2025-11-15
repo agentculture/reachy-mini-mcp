@@ -1,11 +1,12 @@
-# Hearing App - Speech Detection Service
+# Hearing App - Speech Detection & Transcription Service
 
-A lightweight Voice Activity Detection (VAD) service that detects speech and emits events via Unix Domain Socket.
+A Voice Activity Detection (VAD) service with Speech-to-Text (STT) transcription that detects speech and emits events via Unix Domain Socket.
 
 ## Features
 
 - **Voice Activity Detection**: Uses WebRTC VAD for robust speech detection
-- **Event Emission**: Sends speech start/stop events via Unix Domain Socket
+- **Speech-to-Text**: Transcribes detected speech using faster-whisper
+- **Event Emission**: Sends speech start/stop events with transcriptions via Unix Domain Socket
 - **Async Architecture**: Efficient asyncio-based implementation
 - **Multiple Clients**: Supports multiple simultaneous client connections
 - **Configurable**: Environment-based configuration
@@ -21,6 +22,12 @@ A lightweight Voice Activity Detection (VAD) service that detects speech and emi
 │  │  Audio   │──────│   VAD       │ │
 │  │  Input   │      │   Engine    │ │
 │  └──────────┘      └─────────────┘ │
+│                          │          │
+│                          ▼          │
+│                  ┌──────────────┐   │
+│                  │  Whisper STT │   │
+│                  │  (optional)  │   │
+│                  └──────────────┘   │
 │                          │          │
 │                          ▼          │
 │                  ┌──────────────┐   │
@@ -53,6 +60,7 @@ pip install -r requirements.txt
 - WebRTC VAD
 - NumPy
 - python-dotenv
+- faster-whisper (for STT)
 
 ## Configuration
 
@@ -72,9 +80,18 @@ CHUNK_DURATION_MS=30
 
 # Speech Detection Configuration
 MIN_SILENCE_DURATION=2.5
+POST_SPEECH_BUFFER_DURATION=0.5
 SPEECH_THRESHOLD_LOWER=1500
 SPEECH_THRESHOLD_UPPER=2500
 AUDIO_BUFFER_SIZE=100
+
+# Whisper STT Configuration
+WHISPER_MODEL_SIZE=base
+WHISPER_DEVICE=cpu
+WHISPER_COMPUTE_TYPE=int8
+
+# Debugging
+SAVE_AUDIO_FILES=false
 ```
 
 ### Configuration Options
@@ -83,6 +100,10 @@ AUDIO_BUFFER_SIZE=100
 - **VAD_AGGRESSIVENESS**: 0-3, higher = more aggressive filtering (3 recommended)
 - **SAMPLE_RATE**: Audio sample rate in Hz (16000 recommended for VAD)
 - **MIN_SILENCE_DURATION**: Seconds of silence before speech is considered ended
+- **POST_SPEECH_BUFFER_DURATION**: Seconds to continue recording after speech ends (0.5 recommended)
+- **WHISPER_MODEL_SIZE**: Whisper model size (tiny, base, small, medium, large)
+- **WHISPER_DEVICE**: Device for Whisper (cpu or cuda)
+- **WHISPER_COMPUTE_TYPE**: Compute type for Whisper (int8, float16, float32)
 - **SAVE_AUDIO_FILES**: Set to "true" to save audio files for debugging
 
 ## Usage
@@ -143,13 +164,46 @@ Events are emitted as JSON objects, one per line:
 ```json
 {
   "type": "speech_stopped",
-  "timestamp": "2025-11-11T10:30:48.456789",
+  "timestamp": "2025-11-11T10:30:47.456789",
   "data": {
     "event_number": 1,
-    "duration": 3.45,
-    "timestamp": "2025-11-11 10:30:48"
+    "duration": 2.33,
+    "transcription": "Hello, how are you today?",
+    "timestamp": "2025-11-11 10:30:47"
   }
 }
+```
+
+**Note**: The `transcription` field contains the text transcribed from the detected speech using faster-whisper. If transcription fails or audio is empty, this field will be `null`.
+
+## Testing
+
+### Test STT Functionality
+
+Use the included test script to verify STT is working:
+
+```bash
+# Start the hearing event emitter in one terminal
+python3 hearing_event_emitter.py --device ReSpeaker --language en
+
+# In another terminal, run the test client
+python3 test_stt.py
+```
+
+The test client will display speech events with transcriptions:
+
+```
+Connected! Listening for speech events...
+------------------------------------------------------------
+
+🎤 Speech Started (Event #1)
+   Time: 2025-11-15T10:30:45.123456
+
+🛑 Speech Stopped (Event #1)
+   Time: 2025-11-15T10:30:48.456789
+   Duration: 3.33s
+   📝 Transcription: "Hello, how are you today?"
+------------------------------------------------------------
 ```
 
 ## Client Connection
@@ -171,9 +225,13 @@ while True:
         if line.strip():
             event = json.loads(line)
             print(f"Event: {event['type']}")
+            if event['type'] == 'speech_stopped':
+                transcription = event['data'].get('transcription')
+                if transcription:
+                    print(f"Transcription: {transcription}")
 ```
 
-See `../hearing_event_client.py` for a complete client implementation.
+See `../hearing_event_client.py` and `test_stt.py` for complete client implementations.
 
 ## Development
 
