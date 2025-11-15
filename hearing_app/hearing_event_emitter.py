@@ -10,7 +10,6 @@ Usage:
 """
 
 import pyaudio
-import webrtcvad
 import wave
 import time
 import numpy as np
@@ -25,6 +24,10 @@ from dotenv import load_dotenv
 import asyncio
 from collections import deque
 from pathlib import Path
+
+# Import our custom modules
+from vad_detector import VADDetector
+from whisper_stt import WhisperSTT
 
 # Set up logging
 logging.basicConfig(
@@ -57,10 +60,11 @@ class HearingEventEmitter:
         
         # VAD configuration
         vad_aggressiveness = int(os.getenv('VAD_AGGRESSIVENESS', '3'))
-        self.vad = webrtcvad.Vad(vad_aggressiveness)
+        self.vad = VADDetector(aggressiveness=vad_aggressiveness, sample_rate=self.rate)
         
         # Speech detection configuration
         self.min_silence_duration = float(os.getenv('MIN_SILENCE_DURATION', '2.5'))
+        self.post_speech_buffer_duration = float(os.getenv('POST_SPEECH_BUFFER_DURATION', '0.5'))  # 0.5 seconds after speech ends
         self.lower_threshold = int(os.getenv('SPEECH_THRESHOLD_LOWER', '1500'))
         self.upper_threshold = int(os.getenv('SPEECH_THRESHOLD_UPPER', '2500'))
         self.min_audio_bytes = 4000
@@ -69,6 +73,7 @@ class HearingEventEmitter:
         buffer_size = int(os.getenv('AUDIO_BUFFER_SIZE', '100'))
         self.audio_buffer = deque(maxlen=buffer_size)
         self.speech_buffer = []
+        self.post_speech_buffer = []  # Buffer for audio after speech ends
         
         # State
         self.speech_detected = False
@@ -76,6 +81,19 @@ class HearingEventEmitter:
         self.start_time = None
         self.speech_events = 0
         self.processing_lock = asyncio.Lock()
+        self.collecting_post_speech = False
+        
+        # Whisper STT configuration
+        whisper_model_size = os.getenv('WHISPER_MODEL_SIZE', 'base')
+        whisper_device = os.getenv('WHISPER_DEVICE', 'cpu')
+        whisper_compute_type = os.getenv('WHISPER_COMPUTE_TYPE', 'float32')
+        
+        self.whisper = WhisperSTT(
+            model_size=whisper_model_size,
+            device=whisper_device,
+            compute_type=whisper_compute_type,
+            language=self.language
+        )
         
         # Socket setup
         self.server_socket = None
@@ -218,13 +236,9 @@ class HearingEventEmitter:
     
     def is_speech(self, data):
         """Check if audio data contains speech using VAD"""
-        try:
-            return self.vad.is_speech(data, self.rate)
-        except Exception as e:
-            logger.error(f"Error in VAD processing: {e}")
-            return False
+        return self.vad.is_speech(data)
     
-    async def log_speech_event(self, event_type, duration=None):
+    async def log_speech_event(self, event_type, duration=None, transcription=None):
         """Log and emit speech detection events"""
         current_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
         
@@ -242,12 +256,15 @@ class HearingEventEmitter:
             message = f"Speech stopped (Event #{self.speech_events})"
             if duration:
                 message += f" - Duration: {duration:.2f} seconds"
+            if transcription:
+                message += f" - Transcription: '{transcription}'"
             
             logger.info(f"[{current_time}] {message}")
             
             await self.emit_event("speech_stopped", {
                 "event_number": self.speech_events,
                 "duration": duration,
+                "transcription": transcription,
                 "timestamp": current_time
             })
     
@@ -287,6 +304,9 @@ class HearingEventEmitter:
                 if is_speech:
                     await self.handle_speech(data)
                 else:
+                    # If collecting post-speech, still add to buffer
+                    if self.collecting_post_speech:
+                        self.post_speech_buffer.append(data)
                     await self.handle_silence()
             else:
                 # No data, sleep briefly
@@ -294,15 +314,25 @@ class HearingEventEmitter:
     
     async def handle_speech(self, data):
         """Handle detected speech"""
-        if not self.speech_detected:
+        if not self.speech_detected and not self.collecting_post_speech:
             self.start_time = time.time()
             await self.log_speech_event("start")
             self.speech_detected = True
             self.speech_buffer = []
+            self.post_speech_buffer = []
             logger.debug("Speech detected, starting new buffer")
         
-        self.speech_buffer.append(data)
-        self.silence_start_time = None  # Reset silence timer
+        if self.speech_detected:
+            self.speech_buffer.append(data)
+            self.silence_start_time = None  # Reset silence timer
+        elif self.collecting_post_speech:
+            # Add to post-speech buffer
+            self.post_speech_buffer.append(data)
+            # If we detect speech again during post-speech collection, restart speech detection
+            self.speech_detected = True
+            self.collecting_post_speech = False
+            self.silence_start_time = None
+            logger.debug("Speech resumed during post-speech collection, continuing speech detection")
     
     async def handle_silence(self):
         """Handle silence (potential end of speech)"""
@@ -311,49 +341,94 @@ class HearingEventEmitter:
                 self.silence_start_time = time.time()
                 logger.debug("Silence detected, starting silence timer")
             elif time.time() - self.silence_start_time >= self.min_silence_duration:
-                logger.info("Silence duration exceeded, ending speech event")
+                logger.info("Silence duration exceeded, starting post-speech collection")
+                # Start collecting post-speech audio
+                self.speech_detected = False
+                self.collecting_post_speech = True
+                self.post_speech_start_time = time.time()
+        elif self.collecting_post_speech:
+            # Continue collecting post-speech audio for buffer duration
+            if time.time() - self.post_speech_start_time >= self.post_speech_buffer_duration:
+                logger.info("Post-speech buffer complete, processing speech")
                 await self.process_speech()
+                self.collecting_post_speech = False
     
     async def process_speech(self):
-        """Process completed speech segment"""
+        """Process completed speech segment with STT transcription"""
         duration = time.time() - self.start_time
-        audio_size = len(self.speech_buffer) * self.chunk_size * 2  # 2 bytes per sample
         
-        logger.info(f"Processing speech segment: {len(self.speech_buffer)} chunks, {audio_size} bytes")
+        # Combine speech buffer with post-speech buffer
+        all_audio_chunks = self.speech_buffer + self.post_speech_buffer
+        audio_size = len(all_audio_chunks) * self.chunk_size * 2  # 2 bytes per sample
         
-        # Emit completion event
-        await self.log_speech_event("stop", duration)
+        logger.info(f"Processing speech segment: {len(self.speech_buffer)} speech chunks + {len(self.post_speech_buffer)} post-speech chunks = {len(all_audio_chunks)} total chunks, {audio_size} bytes")
+        
+        # Perform STT transcription
+        transcription = None
+        if all_audio_chunks:
+            try:
+                transcription = await self.transcribe_audio(all_audio_chunks)
+                logger.info(f"Transcription result: '{transcription}'")
+            except Exception as e:
+                logger.error(f"Error during transcription: {e}", exc_info=True)
+        
+        # Emit completion event with transcription
+        await self.log_speech_event("stop", duration, transcription)
         
         # Optional: Save audio file for debugging
         if os.getenv('SAVE_AUDIO_FILES', 'false').lower() == 'true':
-            await self.save_audio_file()
+            await self.save_audio_file(all_audio_chunks)
         
         # Reset state
         self.speech_detected = False
         self.silence_start_time = None
         self.speech_buffer = []
+        self.post_speech_buffer = []
     
-    async def save_audio_file(self):
+    async def transcribe_audio(self, audio_chunks):
+        """Transcribe audio using faster-whisper"""
+        if not audio_chunks:
+            return None
+        
+        try:
+            logger.info(f"Starting transcription of {len(audio_chunks)} chunks")
+            
+            # Use the WhisperSTT module
+            transcription = await asyncio.to_thread(
+                self.whisper.transcribe_audio_data,
+                audio_chunks,
+                self.rate,
+                2  # sample_width for int16
+            )
+            
+            if transcription:
+                logger.info(f"Transcription result: '{transcription}'")
+            
+            return transcription
+            
+        except Exception as e:
+            logger.error(f"Error in transcribe_audio: {e}", exc_info=True)
+            return None
+    
+    async def save_audio_file(self, audio_chunks):
         """Save recorded speech to file"""
-        if not self.speech_buffer:
+        if not audio_chunks:
             return
         
         try:
-            combined_audio = np.concatenate(self.speech_buffer)
+            combined_audio = np.concatenate(audio_chunks)
             filename = f"speech_{self.speech_events}_{int(time.time())}.wav"
             
-            await asyncio.to_thread(self._save_audio_sync, combined_audio, filename)
+            # Use WhisperSTT's save method
+            await asyncio.to_thread(
+                self.whisper._save_audio_to_wav,
+                combined_audio,
+                filename,
+                self.rate
+            )
             logger.info(f"Saved audio to {filename}")
         except Exception as e:
             logger.error(f"Error saving audio file: {e}")
-    
-    def _save_audio_sync(self, audio_data, filename):
-        """Synchronous audio file writing"""
-        with wave.open(filename, 'wb') as wav_file:
-            wav_file.setnchannels(1)
-            wav_file.setsampwidth(self.p.get_sample_size(pyaudio.paInt16))
-            wav_file.setframerate(self.rate)
-            wav_file.writeframes(audio_data.tobytes())
     
     async def run(self):
         """Main run loop"""
