@@ -53,7 +53,7 @@ logger = logging.getLogger(__name__)
 # Configuration
 CHAT_COMPLETIONS_URL = "http://localhost:8100/v1/chat/completions"
 MODEL_NAME = "RedHatAI/Llama-3.2-1B-Instruct-FP8"
-
+AGENT_TEMPERATURE = 0.3
 
 class ConversationApp:
     """Conversation application with speech event integration."""
@@ -112,6 +112,63 @@ class ConversationApp:
         logger.info("✓ App initialized")
         logger.info("=" * 70)
     
+    def _trim_conversation_history(self):
+        """
+        Trim conversation history to keep system message + last 9 messages.
+        This maintains context while preventing unbounded growth.
+        Format: [system, user, assistant, user, assistant, ..., user, assistant, user]
+        Total: 10 messages (1 system + 9 conversation messages = ~4.5 pairs)
+        """
+        if len(self.messages) <= 10:
+            return
+        
+        # Keep system message (index 0) and last 9 messages
+        system_message = self.messages[0]
+        recent_messages = self.messages[-9:]
+        
+        self.messages = [system_message] + recent_messages
+        logger.debug(f"Trimmed conversation history to {len(self.messages)} messages")
+    
+    async def _warm_up_for_caching(self, last_assistant_response: str) -> str:
+        """
+        Send a dummy request to warm up the model for caching next token prediction.
+        
+        Args:
+            last_assistan_response: The full assistant response text
+        """
+
+                # send dummy request for next token caching with assistant response + "." as user message
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            # message minus first two message plus system as first message
+            # Include the assistant's response and append "." as a dummy user message for caching
+            cache_messages = self.messages
+            
+            cache_messages += [
+                {"role": "assistant", "content": last_assistant_response},
+                {"role": "user", "content": "."}
+            ]
+
+            if len(cache_messages) > 10:
+                system_message = self.messages[0]
+                recent_messages = self.messages[-9:]
+        
+                cache_messages = [system_message] + recent_messages
+            
+            payload = {
+                "model": MODEL_NAME,
+                "messages": cache_messages,
+                "max_tokens": 1,
+                "temperature": AGENT_TEMPERATURE,
+                "stream": False
+            }
+            try:
+                response = await client.post(CHAT_COMPLETIONS_URL, json=payload)
+                response.raise_for_status()
+            except Exception as e:
+                logger.error(f"Error during dummy request for caching: {e}")
+                raise
+
+
     async def on_speech_started(self, data: Dict[str, Any]):
         """
         Callback for speech started events.
@@ -160,7 +217,7 @@ class ConversationApp:
     async def chat_completion_stream(
         self,
         messages: List[Dict[str, Any]],
-        max_tokens: int = 3000
+        max_tokens: int = 700
     ):
         """
         Make a streaming chat completion request.
@@ -176,9 +233,12 @@ class ConversationApp:
             "model": MODEL_NAME,
             "messages": messages,
             "max_tokens": max_tokens,
-            "temperature": 0.3,
+            "temperature": AGENT_TEMPERATURE,
             "stream": True
         }
+        
+        # Collect the full assistant response for caching
+        full_assistant_response = ""
         
         async with httpx.AsyncClient(timeout=60.0) as client:
             try:
@@ -201,6 +261,7 @@ class ConversationApp:
                                     content = delta.get("content", "")
                                     
                                     if content:
+                                        full_assistant_response += content
                                         yield content
                                         
                             except json.JSONDecodeError:
@@ -212,21 +273,6 @@ class ConversationApp:
                 raise
             except Exception as e:
                 logger.error(f"Error during streaming chat completion: {e}")
-                raise
-        # send dummy request for next token caching
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            payload = {
-                "model": MODEL_NAME,
-                "messages": messages,
-                "max_tokens": 1,
-                "temperature": 0.3,
-                "stream": False
-            }
-            try:
-                response = await client.post(CHAT_COMPLETIONS_URL, json=payload)
-                response.raise_for_status()
-            except Exception as e:
-                logger.error(f"Error during dummy request for caching: {e}")
                 raise
     
     async def process_message(self, user_message: str) -> str:
@@ -241,6 +287,9 @@ class ConversationApp:
         """
         # Add user message to conversation
         self.messages.append({"role": "user", "content": user_message})
+        
+        # Trim history to keep system + last 9 messages (now 10 total with new user message)
+        self._trim_conversation_history()
        
         logger.debug(f"Current history: {len(self.messages)} messages")
 
@@ -282,6 +331,8 @@ class ConversationApp:
         
         # Add assistant response to conversation history
         self.messages.append({"role": "assistant", "content": full_response})
+        
+        await _warm_up_for_caching(full_response)
         
         return full_response
     
