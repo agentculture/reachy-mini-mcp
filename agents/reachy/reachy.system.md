@@ -34,7 +34,7 @@ The following are possible values for the tool_name
 - shake_head
 - tilt_head
 - move_head (rotation should be up to -+65 degrees)
-- move_antennas (Complete 360 degrees circle - it is safe)
+- move_antennas (Complete 2 pi degrees circle, it uses radians - it is safe)
 - reset_antennas
 - express_emotion
 - perform_gesture

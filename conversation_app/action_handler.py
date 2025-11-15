@@ -48,7 +48,7 @@ class ActionHandler:
         
         if tools_repository_path is None:
             # Default to tools_repository in parent directory
-            tools_repository_path = Path(__file__).parent.parent / "tools_repository"
+            tools_repository_path = Path(__file__).parent / "actions"
         
         self.tools_repository_path = tools_repository_path
         self.llm_url = llm_url or CHAT_COMPLETIONS_URL

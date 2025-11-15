@@ -187,6 +187,7 @@ class EventHandler:
     
     async def _on_speech_started(self, data: Dict[str, Any]):
         """Handle speech started event."""
+        print(data)
         event_number = data.get("event_number")
         timestamp = data.get("timestamp")
         
@@ -210,6 +211,7 @@ class EventHandler:
     
     async def _on_speech_stopped(self, data: Dict[str, Any]):
         """Handle speech stopped event."""
+        print(data)
         event_number = data.get("event_number")
         duration = data.get("duration")
         timestamp = data.get("timestamp")

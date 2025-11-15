@@ -144,19 +144,13 @@ class ConversationApp:
         # Create a user message representing the speech event
         # In a real system, this would be transcribed speech
         # For now, we'll create a generic message indicating user spoke
-        user_message = f"[User spoke for {duration:.1f} seconds in speech event #{event_number}]"
+        user_message = data.get("transcription", "")
         
         # For a real implementation, you would:
         # 1. Get the audio file saved by hearing_event_emitter
         # 2. Transcribe it using Whisper or similar
         # 3. Use the transcribed text as user_message
-        
-        # Since we don't have transcription yet, we'll use a placeholder approach:
-        # Acknowledge the user spoke and ask Reachy to respond
-        user_message = "Hello, I just said something to you."
-        
-        logger.info(f"👤 User (simulated): {user_message}")
-        
+                        
         # Process through conversation system
         response = await self.process_message(user_message)
         

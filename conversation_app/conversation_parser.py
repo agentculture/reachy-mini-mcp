@@ -46,6 +46,9 @@ class ConversationParser:
         Parse a token from the streaming response.
         Extracts quotes "..." as speech and *...* as actions.
         
+        Special case: If an action in asterisks appears inside quotes,
+        we treat it as: "text before" *action* "text after"
+        
         Args:
             token: A token/chunk from the streaming LLM response
         """
@@ -62,11 +65,8 @@ class ConversationParser:
                 else:
                     # Start of quote
                     self.in_quote = True
-            elif self.in_quote:
-                self.current_quote += char
-            
-            # Handle action parsing (skip if inside quote)
             elif char == '*':
+                # Handle asterisks - can appear inside or outside quotes
                 if self.in_action:
                     # Found closing *, end the action
                     if self.current_action:
@@ -74,12 +74,23 @@ class ConversationParser:
                         logger.info(f'⚡ Action: *{self.current_action}*')
                     self.current_action = ""
                     self.in_action = False
+                    # If we were inside a quote before the action, resume quote parsing
+                    # (this happens automatically since in_quote stays True)
                 else:
                     # Found opening *, start action
+                    # If we're inside a quote, save the current quote first
+                    if self.in_quote and self.current_quote:
+                        self.speech_queue.append(self.current_quote)
+                        logger.info(f'🗣️ Speech: "{self.current_quote}"')
+                        self.current_quote = ""
+                        # Keep in_quote True to resume quote after action
                     self.in_action = True
-            else:
-                if self.in_action:
-                    self.current_action += char
+            elif self.in_action:
+                # Accumulate action content
+                self.current_action += char
+            elif self.in_quote:
+                # Accumulate quote content
+                self.current_quote += char
     
     def get_speech(self) -> Optional[str]:
         """
