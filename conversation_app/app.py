@@ -40,6 +40,7 @@ import logging
 
 from .event_handler import EventHandler
 from .conversation_parser import ConversationParser
+from .speech_handler import SpeechHandler
 
 # Set up logging
 logging.basicConfig(
@@ -66,11 +67,12 @@ class ConversationApp:
         self.messages = []
         
         # Load the system prompt
-        self.system_prompt = Path("agents/reachy/reachy.system.md").read_text()
+        self.system_prompt = Path("/app/conversation_app/agents/reachy/reachy.system.md").read_text()
         
         # Initialize components
         self.event_handler = EventHandler(socket_path)
         self.parser = ConversationParser()
+        self.speech_handler = None  # Will be initialized in initialize()
         
         # Set up event callbacks
         self.event_handler.set_speech_started_callback(self.on_speech_started)
@@ -87,6 +89,15 @@ class ConversationApp:
             {"role": "system", "content": self.system_prompt}
         ]
         
+        # Initialize speech handler
+        try:
+            self.speech_handler = SpeechHandler()
+            logger.info("✓ Speech handler initialized")
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize speech handler: {e}")
+            logger.warning("   Continuing without TTS...")
+            self.speech_handler = None
+        
         logger.info("✓ App initialized")
         logger.info("=" * 70)
     
@@ -97,9 +108,10 @@ class ConversationApp:
         Args:
             data: Event data containing event_number, timestamp, etc.
         """
-        # Additional processing can be added here
-        # The EventHandler already logs the event
-        pass
+        # Clear TTS queue when user starts speaking to avoid talking over them
+        if self.speech_handler:
+            logger.info("🔇 User started speaking - clearing TTS queue")
+            await self.speech_handler.clear()
     
     async def on_speech_stopped(self, data: Dict[str, Any]):
         """
@@ -210,6 +222,10 @@ class ConversationApp:
         # Reset parser state
         self.parser.reset()
         
+        # Clear any pending speech when new user input arrives
+        if self.speech_handler:
+            await self.speech_handler.clear()
+        
         # Collect full response
         full_response = ""
         
@@ -220,6 +236,13 @@ class ConversationApp:
             full_response += token
             # Parse the token for quotes and actions
             self.parser.parse_token(token)
+            
+            # Process any speech items that were just parsed
+            while self.parser.has_speech():
+                speech_text = self.parser.get_speech()
+                if speech_text and self.speech_handler:
+                    logger.info(f'🗣️  Speaking: "{speech_text[:50]}..."' if len(speech_text) > 50 else f'🗣️  Speaking: "{speech_text}"')
+                    await self.speech_handler.speak(speech_text)
         
         # Add assistant response to conversation history
         self.messages.append({"role": "assistant", "content": full_response})
@@ -258,6 +281,9 @@ class ConversationApp:
     async def cleanup(self):
         """Cleanup resources."""
         logger.info("🧹 Cleaning up...")
+        
+        if self.speech_handler:
+            self.speech_handler.cleanup()
         
         self.event_handler.close()
         
