@@ -39,13 +39,12 @@ class ConversationParser:
         self.current_action = ""
         self.in_quote = False
         self.in_action = False
-        self._star_count = 0
         logger.debug("Parser state reset")
     
     def parse_token(self, token: str):
         """
         Parse a token from the streaming response.
-        Extracts quotes "..." as speech and **...** as actions.
+        Extracts quotes "..." as speech and *...* as actions.
         
         Args:
             token: A token/chunk from the streaming LLM response
@@ -68,32 +67,17 @@ class ConversationParser:
             
             # Handle action parsing (skip if inside quote)
             elif char == '*':
-                if not hasattr(self, '_star_count'):
-                    self._star_count = 0
-                    
-                self._star_count += 1
-                
                 if self.in_action:
-                    # We're inside an action
-                    if self._star_count == 2:
-                        # Found closing **, end the action
-                        if self.current_action:
-                            self.action_queue.append(self.current_action)
-                            logger.info(f'⚡ Action: **{self.current_action}**')
-                        self.current_action = ""
-                        self.in_action = False
-                        self._star_count = 0
+                    # Found closing *, end the action
+                    if self.current_action:
+                        self.action_queue.append(self.current_action)
+                        logger.info(f'⚡ Action: *{self.current_action}*')
+                    self.current_action = ""
+                    self.in_action = False
                 else:
-                    # Not in action yet
-                    if self._star_count == 2:
-                        # Found opening **, start action
-                        self.in_action = True
-                        self._star_count = 0
+                    # Found opening *, start action
+                    self.in_action = True
             else:
-                # Reset star count if we see a non-star character
-                if hasattr(self, '_star_count'):
-                    self._star_count = 0
-                    
                 if self.in_action:
                     self.current_action += char
     
