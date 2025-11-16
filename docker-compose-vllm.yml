@@ -7,11 +7,11 @@ services:
     volumes:
       - /proc:/proc
     
-  vllm-server:
+  vllm-server-front:
     env_file:
       - .env
     image: nvcr.io/nvidia/vllm:25.10-py3
-    container_name: vllm-llama-3.2-3b-server
+    container_name: vllm-llama-3.2-3b-server-front
     restart: unless-stopped
     ports:
       - "8100:8100"  # Expose vLLM API server on port 8100
@@ -38,7 +38,7 @@ services:
       --max-num-batched-tokens 32768
       --max-model-len 65536
       --tensor-parallel-size 1 
-      --gpu-memory-utilization 0.25
+      --gpu-memory-utilization 0.4
       --enable-prefix-caching 
       --enable-chunked-prefill 
       --host 0.0.0.0 
@@ -53,6 +53,57 @@ services:
       - huggingface_cache:/root/.cache/huggingface  # Cache models locally
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8100/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  vllm-server-action:
+    env_file:
+      - .env
+    image: nvcr.io/nvidia/vllm:25.10-py3
+    container_name: vllm-llama-3.2-3b-server-action
+    restart: unless-stopped
+    ports:
+      - "8200:8200"  # Expose vLLM API server on port 8200
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CUDA_VISIBLE_DEVICES=0
+      - HF_TOKEN=${HF_TOKEN}  # Set your Hugging Face token in .env file or export it
+      # SET THIS IN YOUR DOCKER-COMPOSE ENVIRONMENT:
+      - VLLM_ATTENTION_BACKEND=FLASHINFER
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    command: >
+      sh -c "
+      hf auth login --token ${HF_TOKEN} &&
+      hf download RedHatAI/Llama-3.2-3B-Instruct-FP8 --cache-dir /root/.cache/huggingface &&
+      vllm serve RedHatAI/Llama-3.2-3B-Instruct-FP8
+      --kv-cache-dtype fp8
+      --max-num-seqs 1024
+      --max-num-batched-tokens 8192
+      --max-model-len 16384
+      --tensor-parallel-size 1 
+      --gpu-memory-utilization 0.12
+      --enable-prefix-caching 
+      --enable-chunked-prefill 
+      --host 0.0.0.0 
+      --trust-remote-code 
+      --enable-auto-tool-choice
+      --tool-call-parser llama3_json
+      --disable-fastapi-docs 
+      --download-dir /data/models/huggingface 
+      --port 8200
+      "
+    volumes:
+      - huggingface_cache:/root/.cache/huggingface  # Cache models locally
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8200/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -142,7 +193,9 @@ services:
         condition: service_healthy
       reachy-hearing:
         condition: service_healthy
-      vllm-server:
+      vllm-server-front:
+        condition: service_healthy
+      vllm-server-action:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "pgrep", "-f", "conversation_app.app"]

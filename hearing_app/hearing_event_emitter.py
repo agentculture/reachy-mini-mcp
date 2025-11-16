@@ -64,7 +64,7 @@ class HearingEventEmitter:
         self.vad = VADDetector(aggressiveness=vad_aggressiveness, sample_rate=self.rate)
         
         # Speech detection configuration
-        self.min_silence_duration = float(os.getenv('MIN_SILENCE_DURATION', '2.5'))
+        self.min_silence_duration = float(os.getenv('MIN_SILENCE_DURATION', '0.5'))
         self.post_speech_buffer_duration = float(os.getenv('POST_SPEECH_BUFFER_DURATION', '0.5'))  # 0.5 seconds after speech ends
         self.lower_threshold = int(os.getenv('SPEECH_THRESHOLD_LOWER', '1500'))
         self.upper_threshold = int(os.getenv('SPEECH_THRESHOLD_UPPER', '2500'))
