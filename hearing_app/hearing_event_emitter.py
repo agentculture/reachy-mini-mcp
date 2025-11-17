@@ -70,6 +70,11 @@ class HearingEventEmitter:
         self.upper_threshold = int(os.getenv('SPEECH_THRESHOLD_UPPER', '2500'))
         self.min_audio_bytes = 4000
         
+        # Partial transcription configuration
+        self.enable_partial_transcription = os.getenv('ENABLE_PARTIAL_TRANSCRIPTION', 'true').lower() == 'true'
+        self.partial_transcription_interval = float(os.getenv('PARTIAL_TRANSCRIPTION_INTERVAL', '1.0'))  # seconds
+        self.min_partial_chunks = int(os.getenv('MIN_PARTIAL_CHUNKS', '10'))  # Minimum chunks before partial transcription
+        
         # Buffers
         buffer_size = int(os.getenv('AUDIO_BUFFER_SIZE', '100'))
         self.audio_buffer = deque(maxlen=buffer_size)
@@ -83,6 +88,11 @@ class HearingEventEmitter:
         self.speech_events = 0
         self.processing_lock = asyncio.Lock()
         self.collecting_post_speech = False
+        
+        # Partial transcription state
+        self.last_partial_transcription_time = None
+        self.partial_transcription_in_progress = False
+        self.last_partial_text = ""
         
         # Whisper STT configuration
         whisper_model_size = os.getenv('WHISPER_MODEL_SIZE', 'base')
@@ -354,15 +364,30 @@ class HearingEventEmitter:
         """Handle detected speech"""
         if not self.speech_detected and not self.collecting_post_speech:
             self.start_time = time.time()
-            await self.log_speech_event("start")
+            self.last_partial_transcription_time = time.time()
+            #await self.log_speech_event("start")
             self.speech_detected = True
             self.speech_buffer = []
             self.post_speech_buffer = []
+            self.last_partial_text = ""
             logger.debug("Speech detected, starting new buffer")
         
         if self.speech_detected:
+            await self.log_speech_event("ongoing")
+
             self.speech_buffer.append(data)
             self.silence_start_time = None  # Reset silence timer
+            
+            # Check if we should perform partial transcription
+            if self.enable_partial_transcription and not self.partial_transcription_in_progress:
+                current_time = time.time()
+                time_since_last_partial = current_time - self.last_partial_transcription_time
+                
+                if (time_since_last_partial >= self.partial_transcription_interval and 
+                    len(self.speech_buffer) >= self.min_partial_chunks):
+                    # Trigger partial transcription in background
+                    asyncio.create_task(self.process_partial_speech())
+                    
         elif self.collecting_post_speech:
             # Add to post-speech buffer
             self.post_speech_buffer.append(data)
@@ -390,6 +415,54 @@ class HearingEventEmitter:
                 logger.info("Post-speech buffer complete, processing speech")
                 await self.process_speech()
                 self.collecting_post_speech = False
+    
+    async def process_partial_speech(self):
+        """Process partial speech chunk for real-time word detection"""
+        if self.partial_transcription_in_progress:
+            return
+        
+        self.partial_transcription_in_progress = True
+        
+        try:
+            # Take a snapshot of the current speech buffer
+            current_chunks = self.speech_buffer.copy()
+            
+            if not current_chunks or len(current_chunks) < self.min_partial_chunks:
+                return
+            
+            logger.info(f"Processing partial transcription with {len(current_chunks)} chunks")
+            
+            # Perform partial STT transcription
+            partial_transcription = None
+            try:
+                partial_transcription = await self.transcribe_audio(current_chunks)
+                
+                if partial_transcription and any(c.isalnum() for c in partial_transcription):
+                    logger.info(f"Partial transcription: '{partial_transcription}'")
+                    
+                    # Only emit if the text has changed significantly
+                    if partial_transcription != self.last_partial_text:
+                        self.last_partial_text = partial_transcription
+                        
+                        # Emit partial transcription event
+                        await self.emit_event("speech_partial", {
+                            "event_number": self.speech_events,
+                            "partial_text": partial_transcription,
+                            "duration_so_far": time.time() - self.start_time,
+                            "is_partial": True,
+                            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+                        })
+                else:
+                    logger.debug("Partial transcription returned no valid text")
+                    
+            except Exception as e:
+                logger.error(f"Error during partial transcription: {e}", exc_info=True)
+            
+            # Update the last partial transcription time
+            self.last_partial_transcription_time = time.time()
+            
+        finally:
+            self.partial_transcription_in_progress = False
     
     async def process_speech(self):
         """Process completed speech segment with STT transcription"""
@@ -425,6 +498,8 @@ class HearingEventEmitter:
         self.silence_start_time = None
         self.speech_buffer = []
         self.post_speech_buffer = []
+        self.last_partial_text = ""
+        self.partial_transcription_in_progress = False
     
     async def transcribe_audio(self, audio_chunks):
         """Transcribe audio using faster-whisper"""
