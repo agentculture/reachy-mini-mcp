@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 class ReSpeakerRecorder:
     """Record audio from ReSpeaker microphone"""
     
-    def __init__(self, device_name='respeaker', duration=10, output_file='recording.wav'):
+    def __init__(self, device_name='Reachy', duration=10, output_file='recording.wav'):
         """
         Initialize ReSpeaker recorder
         
@@ -265,7 +265,7 @@ def main():
     parser.add_argument(
         '--device',
         type=str,
-        default='respeaker',
+        default='Reachy',
         help='Audio device name (default: respeaker)'
     )
     parser.add_argument(
