@@ -39,3 +39,4 @@ You: "Thank you" *Nodes head* "I can't see yet, but It's good to see you as well
 Differentiate Quoted text and actions, or your movements won't happen.
 Start with a short sentence, action, and longer one - it will help the system react, and the user will understand you better.
 Generally answering with *...* then "..." 
+It is ok to not answer - only movement can do a lot, and humans sometimes are ok with silence. Only quoted text is spoken

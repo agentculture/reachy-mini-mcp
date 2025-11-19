@@ -152,7 +152,7 @@ services:
       apt-get update -qq &&
       apt-get install -y -qq portaudio*-dev libgl1 libusb-1.0-0 git &&
       pip install --no-cache-dir -q -r /app/requirements.txt &&
-      python3 hearing_event_emitter.py --device ReSpeaker --language en
+      python3 hearing_event_emitter.py --device Reachy --language en
       "
     depends_on:
       reachy-daemon:
@@ -180,7 +180,7 @@ services:
       - SOCKET_PATH=/tmp/reachy_sockets/hearing.sock
       - PYTHONUNBUFFERED=1
       - REACHY_BASE_URL=http://localhost:8000  # Daemon URL (accessible via host network mode)
-      - AUDIO_DEVICE=plughw:CARD=Array,DEV=0  # Use ReSpeaker for TTS output (enables AEC)
+      - AUDIO_DEVICE=plughw:CARD=Audio,DEV=0  # Use Reachy Mini Audio for TTS output
     command: >
       sh -c "
       apt-get update -qq &&

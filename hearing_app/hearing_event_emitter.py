@@ -200,10 +200,10 @@ class HearingEventEmitter:
             # Channel 0: AEC-processed microphone (echo-cancelled)
             # Channel 1: Reference/playback signal
             # We need to record both channels but will use only channel 0
-            if 'Reachy' in device_info['name'].lower() and max_channels >= 2:
+            if 'reachy' in device_info['name'].lower() and max_channels >= 2:
                 self.num_channels = 2
                 self.use_aec_channel = True
-                logger.info("Using Reachy with 2-channel AEC mode (will use channel 0 for echo cancellation)")
+                logger.info("Using 'reachy' with 2-channel AEC mode (will use channel 0 for echo cancellation)")
             else:
                 self.num_channels = 1
                 self.use_aec_channel = False

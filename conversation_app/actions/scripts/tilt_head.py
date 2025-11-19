@@ -14,7 +14,7 @@ async def execute(make_request, create_head_pose, tts_queue, params):
     if speech and tts_queue:
         await tts_queue.enqueue_text(speech)
     
-    roll_angle = angle if direction.lower() == 'left' else -angle
+    roll_angle = angle if direction.lower() == 'left' else -1*angle
     pose = create_head_pose(roll=roll_angle, degrees=True)
     
     payload = {'head_pose': pose, 'duration': params.get('duration', 2.0)}
