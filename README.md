@@ -1,14 +1,25 @@
-# Reachy Mini MCP Server
+@# Reachy Mini MCP Server
 
 A Model Context Protocol (MCP) server for controlling the [Reachy Mini](https://github.com/pollen-robotics/reachy_mini) robot using [FastMCP](https://github.com/jlowin/fastmcp).
+
+> [!NOTE]
+> **Looking for the full Conversation App?**
+> This repository also contains the full "Conversation Stack" (Hearing + LLM + Conversation Logic) which turns Reachy Mini into an autonomous conversational robot.
+>
+> The **Docker setup** is specifically for running this full conversation application.
+>
+> 👉 **[Read the Conversation Stack Overview](docs/conversation_stack.md)**
+>
+> 👉 **[Full Docker Setup Guide](DOCKER_SETUP.md)**
 
 This MCP server provides a comprehensive set of tools to control Reachy Mini's head movements, antennas, camera, and perform various gestures and emotional expressions.
 
 ## Features
 
-### Movement Control
+### Movement & Speech Control
 - **Head Control**: Move the head in 3D space (x, y, z) with orientation (roll, pitch, yaw)
 - **Antenna Control**: Control left and right antennas independently
+- **Speech (TTS)**: Make the robot speak while performing actions (via `speech` parameter)
 - **Gestures**: Perform predefined gestures (greeting, yes, no, thinking, celebration)
 - **Emotions**: Express emotions (happy, sad, curious, surprised, confused)
 - **Direction Looking**: Make the robot look in specific directions (up, down, left, right)
@@ -18,10 +29,6 @@ This MCP server provides a comprehensive set of tools to control Reachy Mini's h
 - **Power Management**: Turn robot on/off
 - **Emergency Stop**: Immediately halt all movements
 - **Health Status**: Monitor robot health and system status
-
-### Camera & Sensors
-- **Camera Access**: Capture images from the robot's camera
-- **Camera State**: Monitor camera status and settings
 
 ### Advanced Features
 - **Command Sequences**: Execute multiple robot operations in a single call (NEW!)
@@ -61,27 +68,9 @@ This will install:
 
 Before starting the MCP server, you need to have the Reachy Mini daemon running.
 
-**For Simulation (MuJoCo):**
-```bash
-# Install simulation dependencies first
-pip install reachy-mini[mujoco]
+👉 **[Follow the official Reachy Mini Daemon Setup Guide](https://github.com/pollen-robotics/reachy_mini)**
 
-# Run the daemon in simulation mode
-reachy-mini-daemon --sim
-```
-
-**For Real Robot (Lite/USB):**
-```bash
-reachy-mini-daemon
-```
-
-**For Real Robot (Wireless with Raspberry Pi):**
-```bash
-# Connect to robot's WiFi or network, then:
-reachy-mini-daemon --no-localhost-only
-```
-
-The daemon will start on `http://localhost:8000` and show a dashboard.
+Ensure the daemon is running and accessible (default: `http://localhost:8000`).
 
 ### Step 2: Start the MCP Server
 
@@ -294,9 +283,9 @@ operate_robot(commands=[
 
 For more details on command sequences, see [SEQUENCE_COMMANDS.md](SEQUENCE_COMMANDS.md).
 
-## Using with Claude Desktop
+## Using with MCP Supported client
 
-To use this MCP server with Claude Desktop, add the following to your Claude Desktop MCP configuration file:
+To use this MCP server, add the following to your MCP configuration file:
 
 ### macOS/Linux
 Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
@@ -331,13 +320,6 @@ Edit `%APPDATA%\Claude\claude_desktop_config.json`:
 
 After editing the config, restart Claude Desktop. The Reachy Mini tools will be available in your conversations.
 
-## MCP Resources
-
-The server exposes the following resources:
-
-- `reachy://status` - Get formatted robot status
-- `reachy://capabilities` - Get description of robot capabilities
-
 ## MCP Prompts
 
 The server includes helpful prompts:
@@ -359,46 +341,6 @@ The server includes helpful prompts:
                                                           │  Robot/Sim      │
                                                           └─────────────────┘
 ```
-
-## Safety Guidelines
-
-1. **Always check robot state** before issuing movement commands
-2. **Use appropriate durations** (typically 1-3 seconds) for smooth movements
-3. **Avoid extreme angles** that might stress the motors
-4. **Use `stop_all_movements()`** in case of unexpected behavior
-5. **Turn off the robot** with `turn_off_robot()` when done
-6. **Monitor health status** periodically during extended use
-
-### Recommended Limits
-
-**Head Position:**
-- Position offsets: ±20mm on x/y/z
-- Rotation angles: ±45 degrees for safe operation
-
-**Antennas:**
-- Typical range: -45 to 45 degrees
-
-## Troubleshooting
-
-### MCP Server won't start
-- Ensure all dependencies are installed: `pip install -r requirements.txt`
-- Verify Python version is 3.10 or higher: `python --version`
-
-### Can't connect to robot
-- Ensure Reachy Mini daemon is running: check `http://localhost:8000`
-- Verify daemon is accepting connections (use `--no-localhost-only` if needed)
-- Check that the robot is powered on and connected
-
-### Robot not moving
-- Use `turn_on_robot()` to power on the robot first
-- Check robot state with `get_robot_state()`
-- Verify no errors in daemon console
-
-### Movements are jerky or incomplete
-- Increase movement duration (use 2-3 seconds instead of 1)
-- Check if multiple commands are being sent too quickly
-- Use `asyncio.sleep()` between sequential movements
-
 ## Development
 
 ### Repository-Based Tool System
@@ -482,14 +424,12 @@ This verifies all JSON files are valid and script files exist.
 ## Resources
 
 - [Reachy Mini GitHub](https://github.com/pollen-robotics/reachy_mini)
-- [Reachy Mini Documentation](https://docs.pollen-robotics.com/)
 - [FastMCP Documentation](https://github.com/jlowin/fastmcp)
 - [Model Context Protocol Specification](https://modelcontextprotocol.io/)
-- [Reachy Mini Assembly Guide](https://docs.pollen-robotics.com/assembly-guide)
 
 ## License
 
-This project is licensed under the Apache 2.0 License, matching the Reachy Mini SDK.
+This project is licensed under the MIT License, and does not extend to the Reachy Mini Daemon.
 
 ## Contributing
 
@@ -500,7 +440,6 @@ Contributions are welcome! Please feel free to submit issues or pull requests.
 For issues related to:
 - **This MCP server**: Open an issue in this repository
 - **Reachy Mini robot**: Visit [Reachy Mini GitHub Issues](https://github.com/pollen-robotics/reachy_mini/issues)
-- **FastMCP framework**: Visit [FastMCP GitHub Issues](https://github.com/jlowin/fastmcp/issues)
 
 ## Credits
 
