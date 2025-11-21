@@ -14,6 +14,31 @@ A Model Context Protocol (MCP) server for controlling the [Reachy Mini](https://
 
 This MCP server provides a comprehensive set of tools to control Reachy Mini's head movements, antennas, camera, and perform various gestures and emotional expressions.
 
+## Roadmap
+
+### MCP
+- [ ] Speech: TTS, piper
+- [ ] Agentic layer
+- [ ] Queue actions support
+- [ ] Interruption support
+- [ ] Move body support, reachy-mini python SDK
+
+### Conversation app 
+- [ ] Hearing: 
+  - [ ] VAD, WebRTCVAD / SileroVAD
+  - [ ] STT, faster-whisper
+- [ ] Vision
+- [ ] Memory:
+  - [ ] File
+  - [ ] Vector DB
+  - [ ] Vector Graph DB
+- [ ] Growth, nightly fine tunes support
+- [ ] MQTT support 
+- [ ] Move to [autonomous-intelligence](https://github.com/OriNachum/autonomous-intelligence) repo
+
+
+
+
 ## Features
 
 ### Movement & Speech Control
@@ -429,7 +454,7 @@ This verifies all JSON files are valid and script files exist.
 
 ## License
 
-This project is licensed under the MIT License, and does not extend to the Reachy Mini Daemon.
+This project is licensed under the MIT License, including the conversation and hearing app within this repository, and does not extend to the Reachy Mini Daemon.
 
 ## Contributing
 
