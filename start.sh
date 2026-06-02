@@ -41,6 +41,6 @@ source .venv/bin/activate
 echo ""
 echo "Starting MCP server..."
 echo ""
-python server.py
+python -m reachy_mini_mcp serve
 
 

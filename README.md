@@ -70,25 +70,57 @@ This MCP server provides a comprehensive set of tools to control Reachy Mini's h
 
 ## Installation
 
-### 1. Set up Python Environment
+The project ships as a pip-installable distribution, `reachy-mini-mcp`, which
+provides both the MCP **server** and a manager **CLI** (`reachy-mini-mcp`).
 
 ```bash
-# Create a virtual environment (recommended)
-python3 -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+# Manager CLI only (pure stdlib — show/install/uninstall/doctor/overview):
+uv tool install reachy-mini-mcp        # or: pipx install reachy-mini-mcp
+
+# To actually run the server, add the [server] extra (and [tts] for speech):
+pip install "reachy-mini-mcp[server]"          # MCP stdio server
+pip install "reachy-mini-mcp[server,tts]"      # + Piper TTS
+pip install "reachy-mini-mcp[openai]"          # OpenAI-compatible HTTP server
 ```
 
-### 2. Install Dependencies
+From a source checkout, `./setup.sh` creates a `.venv` and installs the package
+editable with `[server,tts]`.
+
+## The manager CLI
+
+`reachy-mini-mcp` is an MCP-server manager — it tells an agent or operator how to
+register and run the server, and can do it for them:
 
 ```bash
-pip install -r requirements.txt
+reachy-mini-mcp overview     # one-screen status (also the no-arg default)
+reachy-mini-mcp show         # print the mcp.json snippet for this machine
+reachy-mini-mcp explain      # how MCP registration works + where configs live
+reachy-mini-mcp install --client claude-code --scope project   # set it up
+reachy-mini-mcp uninstall --client claude-code --scope project # put it down
+reachy-mini-mcp doctor       # diagnose deps, daemon, and client registration
+reachy-mini-mcp serve        # run the FastMCP stdio server (what mcp.json calls)
 ```
 
-This will install:
+`install` / `uninstall` target `claude-code` (project `.mcp.json` or user
+`~/.claude.json`), `claude-desktop`, `cursor`, or any `--path FILE`. They merge
+into existing config (other servers are preserved) and accept `--dry-run` to
+print the result without writing.
 
-- `fastmcp`: MCP server framework
-- `httpx`: HTTP client for API communication
-- `reachy-mini`: Reachy Mini SDK (optional, for direct Python control)
+## Registering with an MCP client
+
+The `mcp.json` entry to add (also produced by `reachy-mini-mcp show`):
+
+```json
+{
+  "mcpServers": {
+    "reachy-mini": {
+      "command": "reachy-mini-mcp",
+      "args": ["serve"],
+      "env": { "REACHY_BASE_URL": "http://localhost:8000" }
+    }
+  }
+}
+```
 
 ## Running the MCP Server
 
@@ -102,17 +134,12 @@ Ensure the daemon is running and accessible (default: `http://localhost:8000`).
 
 ### Step 2: Start the MCP Server
 
-In a new terminal (with the same virtual environment activated):
-
 ```bash
-python server.py
+reachy-mini-mcp serve
 ```
 
-Or use FastMCP directly:
-
-```bash
-fastmcp run server.py
-```
+Equivalent invocations: `python -m reachy_mini_mcp serve`, or for a source
+checkout `fastmcp run reachy_mini_mcp/server.py`.
 
 The MCP server will now be running and ready to accept connections from MCP clients.
 
@@ -316,42 +343,36 @@ For more details on command sequences, see [SEQUENCE_COMMANDS.md](SEQUENCE_COMMA
 
 ## Using with MCP Supported client
 
-To use this MCP server, add the following to your MCP configuration file:
+The easiest way is to let the manager CLI write the config for you:
 
-### macOS/Linux
+```bash
+reachy-mini-mcp install --client claude-desktop   # or claude-code / cursor
+```
 
-Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
+To do it by hand, add this to your client's config file (the same JSON works for
+Claude Desktop, Claude Code, and Cursor — see locations below):
 
 ```json
 {
   "mcpServers": {
     "reachy-mini": {
-      "command": "python",
-      "args": ["/Users/ori.nachum/Git/InnovationLabs/mcps/reachy-mini-mcp/server.py"],
-      "env": {
-        "PYTHONPATH": "/Users/ori.nachum/Git/InnovationLabs/mcps/reachy-mini-mcp/.venv/lib/python3.12/site-packages"
-      }
+      "command": "reachy-mini-mcp",
+      "args": ["serve"],
+      "env": { "REACHY_BASE_URL": "http://localhost:8000" }
     }
   }
 }
 ```
 
-### Windows
+Config file locations:
 
-Edit `%APPDATA%\Claude\claude_desktop_config.json`:
+- **Claude Desktop** — macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`;
+  Linux: `~/.config/Claude/claude_desktop_config.json`;
+  Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+- **Claude Code** — project: `./.mcp.json`; user: `~/.claude.json`
+- **Cursor** — project: `./.cursor/mcp.json`; user: `~/.cursor/mcp.json`
 
-```json
-{
-  "mcpServers": {
-    "reachy-mini": {
-      "command": "python",
-      "args": ["C:\\path\\to\\InnovationLabs\\mcps\\reachy-mini-mcp\\server.py"]
-    }
-  }
-}
-```
-
-After editing the config, restart Claude Desktop. The Reachy Mini tools will be available in your conversations.
+After editing the config, restart the client. The Reachy Mini tools will be available in your conversations.
 
 ## MCP Prompts
 
@@ -365,7 +386,8 @@ The server includes helpful prompts:
 ```text
 ┌─────────────────┐         ┌──────────────────┐         ┌─────────────────┐
 │  MCP Client     │◄───────►│  FastMCP Server  │◄───────►│ Reachy Daemon   │
-│  (Claude, etc)  │  stdio  │  (server.py)     │  HTTP   │  (localhost:8000)│
+│  (Claude, etc)  │  stdio  │ (reachy-mini-mcp │  HTTP   │  (localhost:8000)│
+│                 │         │      serve)      │         │                 │
 └─────────────────┘         └──────────────────┘         └─────────────────┘
                                                                     │
                                                                     ▼

@@ -4,13 +4,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A control layer for the [Reachy Mini](https://github.com/pollen-robotics/reachy_mini) robot. Nothing here drives motors directly — every action is an HTTP call to the **Reachy Mini daemon** (default `http://localhost:8000`), which must be running separately. This repo exposes the daemon's capabilities to LLMs two ways, both backed by one shared tool repository:
+A control layer for the [Reachy Mini](https://github.com/pollen-robotics/reachy_mini) robot. Nothing here drives motors directly — every action is an HTTP call to the **Reachy Mini daemon** (default `http://localhost:8000`), which must be running separately. The code lives in the **`reachy_mini_mcp/`** package (a pip-installable distribution, `reachy-mini-mcp`, built with hatchling). It exposes the daemon's capabilities to LLMs two ways, both backed by one shared tool repository:
 
-- **`server.py`** — a FastMCP (stdio) MCP server. Exposes exactly **one** MCP tool, `operate_robot`, a meta-tool that dispatches to every robot operation by name. Individual tools are loaded into an in-process registry but deliberately *not* surfaced as separate MCP tools.
-- **`server_openai.py`** — a FastAPI HTTP server (port **8100**) that speaks an OpenAI-ish dialect: `GET /tools`, `POST /execute_tool`, `POST /v1/chat/completions`. Here each tool *is* exposed individually in OpenAI function-calling format.
+- **`reachy_mini_mcp/server.py`** — a FastMCP (stdio) MCP server. Exposes exactly **one** MCP tool, `operate_robot`, a meta-tool that dispatches to every robot operation by name. Individual tools are loaded into an in-process registry but deliberately *not* surfaced as separate MCP tools.
+- **`reachy_mini_mcp/server_openai.py`** — a FastAPI HTTP server (port **8100**) that speaks an OpenAI-ish dialect: `GET /tools`, `POST /execute_tool`, `POST /v1/chat/completions`. Here each tool *is* exposed individually in OpenAI function-calling format.
+
+In front of both sits **`reachy_mini_mcp/cli/`** — the `reachy-mini-mcp` console
+script, an MCP-server **manager**: `overview`, `show` (print the mcp.json
+snippet), `explain`, `install`/`uninstall` (merge/remove the entry in a client
+config), `doctor`, and `serve` (run the server — what mcp.json launches). The
+manager imports **no** robot dependencies; only `serve` pulls in the FastMCP
+stack (lazily), so a bare `pip install reachy-mini-mcp` is a working manager and
+the robot runtime lives behind the `[server]` / `[tts]` / `[openai]` extras.
 
 ```text
-MCP client / HTTP client  →  server.py | server_openai.py  →  Reachy daemon (:8000)  →  robot/sim
+MCP client / HTTP client  →  reachy_mini_mcp.server | .server_openai  →  Reachy daemon (:8000)  →  robot/sim
+                  manager:  reachy-mini-mcp {show,install,doctor,serve,...}
 ```
 
 Beyond the robot-control layer, this repo is also an **AgentCulture mesh agent** —
@@ -20,30 +29,44 @@ and [Skills](#skills) below.
 ## Commands
 
 ```bash
-# First-time setup (creates .venv, installs requirements.txt, offers MuJoCo sim deps)
+# First-time setup (creates .venv, installs the package editable with [server,tts])
 ./setup.sh
 
-# MCP server (stdio) — requires the daemon running first
-./start.sh                 # wraps: source .venv/bin/activate && python server.py
-python server.py
-fastmcp run server.py
+# Manager CLI (no robot deps needed)
+reachy-mini-mcp overview          # status; also the no-arg default
+reachy-mini-mcp show              # print the mcp.json snippet
+reachy-mini-mcp install --client claude-code --scope project   # / uninstall
+reachy-mini-mcp doctor            # diagnose deps, daemon, registration
 
-# OpenAI-compatible HTTP server on :8100 (uses requirements-openai.txt)
+# MCP server (stdio) — requires the daemon running first
+./start.sh                        # wraps: source .venv/bin/activate && python -m reachy_mini_mcp serve
+reachy-mini-mcp serve             # or: python -m reachy_mini_mcp serve
+fastmcp run reachy_mini_mcp/server.py
+
+# OpenAI-compatible HTTP server on :8100
 ./start_openai_server.sh
-python server_openai.py
+reachy-mini-mcp serve --openai    # or: python -m reachy_mini_mcp.server_openai
+
+# Tests (manager CLI; no robot stack required)
+uv run pytest -n auto -v
 
 # Piper TTS voice model download helper
 ./setup_piper_model.sh
 ```
 
-There is **no test suite**. The README references `python test_repository.py`, but that file does not exist in the repo — don't try to run it. Likewise `docs/conversation_stack.md`, `DOCKER_SETUP.md`, and `SEQUENCE_COMMANDS.md` are linked from the README but are not present.
+Tests live in `tests/` and cover the manager CLI (mcp.json builder, client-config
+merge/remove, command smoke tests) — they need no robot stack or daemon. The
+robot runtime (`server.py`, `server_openai.py`, `tts_queue.py`, tool scripts) is
+not unit-tested; verify it by running `serve` against a live daemon. The README
+links `docs/conversation_stack.md`, `DOCKER_SETUP.md`, and `SEQUENCE_COMMANDS.md`,
+which are not present in the repo.
 
 ## The tool repository (the core abstraction)
 
-Tools are data + a script, not hardcoded Python. To add or change a robot operation you edit `tools_repository/`, never the server files:
+Tools are data + a script, not hardcoded Python. To add or change a robot operation you edit `reachy_mini_mcp/tools_repository/`, never the server files (it ships as package data in the wheel):
 
 ```text
-tools_repository/
+reachy_mini_mcp/tools_repository/
 ├── tools_index.json     # registry: name → definition_file, with enabled flag
 ├── <tool>.json          # parameter schema + which script runs it
 └── scripts/<tool>.py    # the actual logic
@@ -75,17 +98,26 @@ This meta-tool has two modes and some implicit behavior worth knowing:
 
 ## Two servers, one set of machinery — keep them in sync
 
-`server.py` and `server_openai.py` each contain their own copy of `create_head_pose`, `make_request`, and the tool-loading functions. A fix to loading/dispatch logic generally needs to be applied to **both**. Known divergences to be aware of:
+`reachy_mini_mcp/server.py` and `reachy_mini_mcp/server_openai.py` each contain their own copy of `create_head_pose`, `make_request`, and the tool-loading functions. A fix to loading/dispatch logic generally needs to be applied to **both**. Both now also expose a `main()` entry point (called by `reachy-mini-mcp serve` / `serve --openai`). Known divergences to be aware of:
 
 - `server.py` reads `REACHY_BASE_URL` from the environment; `server_openai.py` **hardcodes** `http://localhost:8000`.
 - `server.py` builds an `inspect.Signature` with type annotations for each tool (FastMCP introspects it); `server_openai.py` doesn't need that and builds an OpenAI JSON schema instead.
+- `server.py` is a **stdio** server, so its startup banner / tool-loading prints are routed to **stderr** (stdout is the JSON-RPC channel); `server_openai.py` is HTTP, so it prints freely.
 - `server_openai.py`'s `/v1/chat/completions` is a **stub** — naive keyword matching ("turn on" → `turn_on_robot`), not a real LLM. Real LLM reasoning is expected to come from an upstream model (e.g. the vLLM containers) that then calls `/execute_tool`.
 
 ## Configuration
 
 Copy `.env.example` (MCP/TTS) or `.env.openai.example` (HTTP/LLM) to `.env`. `.env` is gitignored. Key vars: `REACHY_BASE_URL`, `PIPER_MODEL` (path **without** `.onnx`), `AUDIO_DEVICE` (ALSA device, find via `aplay -L`), and `HF_TOKEN` for the Docker stack.
 
-TTS (`tts_queue.py`) shells out to the `piper` executable and plays WAVs with `aplay` on a background thread. If `piper`/`aplay` or a model is missing, TTS init fails gracefully and `speech` params are silently ignored.
+TTS (`reachy_mini_mcp/tts_queue.py`) shells out to the `piper` executable and plays WAVs with `aplay` on a background thread. If `piper`/`aplay` or a model is missing, TTS init fails gracefully and `speech` params are silently ignored.
+
+Packaging lives in `pyproject.toml` (hatchling). Runtime deps are **extras**, not
+base deps: the manager CLI has zero runtime deps; `[server]` (fastmcp/httpx/mcp/
+reachy-mini/python-dotenv) is needed for `serve`, `[tts]` (piper-tts/pyaudio) for
+speech, `[openai]` for the FastAPI server. `requirements*.txt` are thin shims onto
+those extras. Version is single-sourced in `pyproject.toml` (read at runtime via
+`importlib.metadata` in `reachy_mini_mcp/__init__.py`); bump it with the
+`version-bump` skill and keep `CHANGELOG.md` in step.
 
 ## The conversation stack (Docker) — partially present
 
@@ -134,12 +166,13 @@ lifecycle to `devex pr`) and **`agtag`** (>=0.1) on PATH (the `communicate` skil
 `agtag issue`); **`convertible`** on PATH is *optional* — only the `outsource` skill
 needs it, and only when invoked.
 
-Several kit skills assume a `pyproject.toml` / tests / PyPI / SonarCloud project that
-this repo does not have — `version-bump`, `run-tests`, `sonarclaude`,
-`pypi-maintainer`, and the SonarCloud/PyPI parts of `cicd` are therefore **dormant**
-(vendored for kit completeness and mesh uniformity). The `cicd` PR lifecycle
-(`devex pr` open/read/reply/delta), `communicate`, `outsource`, and the devague
-workflow trio work today.
+As of the `0.1.0` packaging work the repo now has a `pyproject.toml`, a `tests/`
+suite, and a PyPI/TestPyPI publish workflow, so **`version-bump`, `run-tests`, and
+`pypi-maintainer` are now live** (the dist name is `reachy-mini-mcp`; CI publishes
+via OIDC Trusted Publishing in `.github/workflows/publish.yml`). Still dormant:
+`sonarclaude` and the SonarCloud parts of `cicd` (no SonarCloud project wired).
+The `cicd` PR lifecycle (`devex pr` open/read/reply/delta), `communicate`,
+`outsource`, and the devague workflow trio work today.
 
 The vendored `.claude/skills/` are cited **verbatim** — do not reformat or edit their
 scripts; re-sync from guildmaster instead (see `docs/skill-sources.md`). The
