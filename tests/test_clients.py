@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import json
+import sys
 
 import pytest
 
@@ -82,3 +82,74 @@ def test_resolve_claude_code_scopes(tmp_path, monkeypatch):
     assert project.path == tmp_path / ".mcp.json"
     user = _clients.resolve_target(client="claude-code", scope="user")
     assert user.path.name == ".claude.json"
+
+
+def test_claude_desktop_path_darwin(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "darwin")
+    target = _clients.resolve_target(client="claude-desktop")
+    assert target.path.as_posix().endswith(
+        "Library/Application Support/Claude/claude_desktop_config.json"
+    )
+
+
+def test_claude_desktop_path_windows_with_appdata(monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    target = _clients.resolve_target(client="claude-desktop")
+    assert target.path == tmp_path / "Claude" / "claude_desktop_config.json"
+
+
+def test_claude_desktop_path_windows_without_appdata(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.delenv("APPDATA", raising=False)
+    target = _clients.resolve_target(client="claude-desktop")
+    assert "AppData" in target.path.parts
+    assert "Roaming" in target.path.parts
+
+
+def test_resolve_target_unknown_scope():
+    with pytest.raises(ReachyError):
+        _clients.resolve_target(client="claude-code", scope="bogus")
+
+
+def test_load_config_oserror_on_directory(tmp_path):
+    # Reading a directory as text raises OSError → ReachyError, not a traceback.
+    d = tmp_path / "is_a_dir"
+    d.mkdir()
+    with pytest.raises(ReachyError):
+        _clients.load_config(d)
+
+
+def test_load_config_empty_file_returns_empty(tmp_path):
+    p = tmp_path / "empty.json"
+    p.write_text("   \n", encoding="utf-8")
+    assert _clients.load_config(p) == {}
+
+
+def test_load_config_rejects_non_object(tmp_path):
+    p = tmp_path / "array.json"
+    p.write_text("[1, 2, 3]", encoding="utf-8")
+    with pytest.raises(ReachyError):
+        _clients.load_config(p)
+
+
+def test_merge_entry_rejects_non_object_servers():
+    with pytest.raises(ReachyError):
+        _clients.merge_entry({"mcpServers": "not-an-object"}, name="reachy-mini", entry=ENTRY)
+
+
+def test_is_installed_swallows_bad_json(tmp_path):
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not json", encoding="utf-8")
+    assert _clients.is_installed(bad, name="reachy-mini") is False
+
+
+def test_write_config_oserror_becomes_reachy_error(tmp_path, monkeypatch):
+    # Force the atomic replace to fail; write_config must surface a ReachyError
+    # (and clean up the temp file) rather than leak the OSError.
+    def boom(*a, **k):
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(_clients.os, "replace", boom)
+    with pytest.raises(ReachyError):
+        _clients.write_config(tmp_path / "cfg.json", {"mcpServers": {}})

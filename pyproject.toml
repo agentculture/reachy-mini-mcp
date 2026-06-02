@@ -1,6 +1,6 @@
 [project]
 name = "reachy-mini-mcp"
-version = "0.1.0"
+version = "0.2.0"
 description = "MCP server + manager CLI for the Reachy Mini robot."
 readme = "README.md"
 license = "MIT"
@@ -84,6 +84,7 @@ relative_files = true
 
 [tool.coverage.report]
 show_missing = true
+fail_under = 95
 exclude_lines = [
     "pragma: no cover",
     "if __name__ == .__main__.",

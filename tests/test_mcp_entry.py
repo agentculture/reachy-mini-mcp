@@ -36,3 +36,18 @@ def test_entry_only_helper():
 def test_base_url_from_env(monkeypatch):
     monkeypatch.setenv("REACHY_BASE_URL", "http://daemon:1234")
     assert _mcp.build_env()["REACHY_BASE_URL"] == "http://daemon:1234"
+
+
+def test_build_env_folds_in_optional_tts_vars(monkeypatch):
+    monkeypatch.setenv("PIPER_MODEL", "/models/voice")
+    monkeypatch.setenv("AUDIO_DEVICE", "hw:1,0")
+    env = _mcp.build_env()
+    assert env["PIPER_MODEL"] == "/models/voice"
+    assert env["AUDIO_DEVICE"] == "hw:1,0"
+
+
+def test_resolve_command_installed_uses_console_script(monkeypatch):
+    monkeypatch.setattr(_mcp.shutil, "which", lambda _name: "/usr/local/bin/reachy-mini-mcp")
+    command, args = _mcp.resolve_command()
+    assert command == "/usr/local/bin/reachy-mini-mcp"
+    assert args == ["serve"]

@@ -50,8 +50,10 @@ reachy-mini-mcp serve --openai    # or: python -m reachy_mini_mcp.server_openai
 # Tests (manager CLI only — no robot stack/daemon needed). Avoid `uv sync`/`uv run
 # pytest`: the universal resolve pulls the [server] extra → reachy-mini → pycairo,
 # which needs system cairo to build. Install just the manager + pytest instead:
-uv pip install -e . pytest pytest-xdist   # `uv venv` first if you have no venv
+uv pip install -e . pytest pytest-xdist pytest-cov   # `uv venv` first if you have no venv
+# Plain run, or with coverage (CI uses the --cov form; fail_under=95 gate applies):
 uv run --no-project pytest -n auto -v
+uv run --no-project pytest -n auto --cov=reachy_mini_mcp --cov-report=xml:coverage.xml --cov-report=term -v
 
 # Piper TTS voice model download helper
 ./setup_piper_model.sh
@@ -172,10 +174,17 @@ needs it, and only when invoked.
 As of the `0.1.0` packaging work the repo now has a `pyproject.toml`, a `tests/`
 suite, and a PyPI/TestPyPI publish workflow, so **`version-bump`, `run-tests`, and
 `pypi-maintainer` are now live** (the dist name is `reachy-mini-mcp`; CI publishes
-via OIDC Trusted Publishing in `.github/workflows/publish.yml`). Still dormant:
-`sonarclaude` and the SonarCloud parts of `cicd` (no SonarCloud project wired).
-The `cicd` PR lifecycle (`devex pr` open/read/reply/delta), `communicate`,
-`outsource`, and the devague workflow trio work today.
+via OIDC Trusted Publishing in `.github/workflows/publish.yml`). As of `0.2.0`, the
+`publish.yml` `test` job also generates `coverage.xml` and runs a **SonarCloud**
+scan (`sonar-project.properties`, projectKey `agentculture_reachy_mini_mcp`; CLI
+coverage is gated at `fail_under = 95`). The scan step is guarded by
+`if: env.SONAR_TOKEN != ''`, so it stays inert — and `sonarclaude` / the SonarCloud
+parts of `cicd` return no data — until the external SonarCloud project and the
+`SONAR_TOKEN` repo secret are provisioned; once they are, both go live with no code
+change. The robot runtime is coverage-excluded (it needs a live daemon/hardware)
+but kept indexed for static analysis. The `cicd` PR lifecycle (`devex pr`
+open/read/reply/delta), `communicate`, `outsource`, and the devague workflow trio
+work today.
 
 The vendored `.claude/skills/` are cited **verbatim** — do not reformat or edit their
 scripts; re-sync from guildmaster instead (see `docs/skill-sources.md`). The
