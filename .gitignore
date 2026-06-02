@@ -50,3 +50,13 @@ htmlcov/
 
 
 .env
+
+# Local agent-tooling state (devex PR lifecycle + teken)
+.teken/
+.devex/
+
+# Per-machine skills config (copy from skills.local.yaml.example)
+skills.local.yaml
+
+# Claude Code per-machine local settings (not shared)
+.claude/settings.local.json

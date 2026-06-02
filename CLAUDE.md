@@ -13,6 +13,10 @@ A control layer for the [Reachy Mini](https://github.com/pollen-robotics/reachy_
 MCP client / HTTP client  →  server.py | server_openai.py  →  Reachy daemon (:8000)  →  robot/sim
 ```
 
+Beyond the robot-control layer, this repo is also an **AgentCulture mesh agent** —
+its mesh identity and vendored skill kit are described under [Mesh identity](#mesh-identity-agentculture)
+and [Skills](#skills) below.
+
 ## Commands
 
 ```bash
@@ -92,3 +96,51 @@ TTS (`tts_queue.py`) shells out to the `piper` executable and plays WAVs with `a
 - `agents/reachy/reachy.system.md` — the robot's persona / system prompt for the LLM driving `operate_robot`.
 - `dance_moves/*.json` — despite the `.json` extension these are **captured LLM debug transcripts** (example `operate_robot` command sequences with parse logs), not structured config. Useful as examples of expected tool-call output, not as data to load.
 - `_config.yml` — Jekyll config for the GitHub Pages project site; unrelated to the Python servers.
+
+## Mesh identity (AgentCulture)
+
+This repo is also an **AgentCulture mesh agent**, declared in `culture.yaml`:
+
+```yaml
+agents:
+- suffix: reachy-mini-mcp
+  backend: claude
+```
+
+`backend: claude` fixes the runtime prompt file to **`CLAUDE.md`** (this file).
+Together they satisfy the two invariants `steward doctor` verifies:
+**prompt-file-present** (an agent is declared and the matching prompt file is on
+disk) and **backend-consistency** (`claude` ↔ `CLAUDE.md`).
+
+Note the two distinct prompts: **this file** is the *dev / mesh* prompt (guidance for
+Claude Code working **on** the repo), while **`agents/reachy/reachy.system.md`** is the
+robot's *runtime* persona that drives `operate_robot`. Different files, different
+audiences — editing one is not editing the other.
+
+Sign mesh / issue posts as `- reachy-mini-mcp (Claude)` — the `cicd` / `communicate`
+scripts resolve the nick from `culture.yaml` automatically (via `_resolve-nick.sh` /
+`agtag`), so don't hand-author the trailing signature.
+
+## Skills
+
+`.claude/skills/` vendors the **canonical guildmaster skill kit** (12 skills,
+cite-don't-import). Provenance and the re-sync procedure live in
+`docs/skill-sources.md`. Three skills (`think`, `spec-to-plan`,
+`assign-to-workforce`) originate in `devague`, and `outsource` originates in
+`convertible` — all re-broadcast via guildmaster.
+
+Tooling prerequisites: **`devex`** (>=0.21) on PATH (the `cicd` skill delegates the PR
+lifecycle to `devex pr`) and **`agtag`** (>=0.1) on PATH (the `communicate` skill wraps
+`agtag issue`); **`convertible`** on PATH is *optional* — only the `outsource` skill
+needs it, and only when invoked.
+
+Several kit skills assume a `pyproject.toml` / tests / PyPI / SonarCloud project that
+this repo does not have — `version-bump`, `run-tests`, `sonarclaude`,
+`pypi-maintainer`, and the SonarCloud/PyPI parts of `cicd` are therefore **dormant**
+(vendored for kit completeness and mesh uniformity). The `cicd` PR lifecycle
+(`devex pr` open/read/reply/delta), `communicate`, `outsource`, and the devague
+workflow trio work today.
+
+The vendored `.claude/skills/` are cited **verbatim** — do not reformat or edit their
+scripts; re-sync from guildmaster instead (see `docs/skill-sources.md`). The
+markdownlint config ignores `.claude/skills/**` for this reason.
