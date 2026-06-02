@@ -7,20 +7,32 @@ on:
       - "pyproject.toml"
       - "reachy_mini_mcp/**"
       - "tests/**"
+      - "sonar-project.properties"
+      - ".github/workflows/publish.yml"
   pull_request:
     branches: [main]
     paths:
       - "pyproject.toml"
       - "reachy_mini_mcp/**"
       - "tests/**"
+      - "sonar-project.properties"
+      - ".github/workflows/publish.yml"
 
 jobs:
   test:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    # Promote SONAR_TOKEN to job env so the SonarCloud step can gate on
+    # `env.SONAR_TOKEN != ''` (secrets.* isn't allowed in `if:`). Token-less
+    # repos and fork PRs (no injected secret) skip the scan and stay green.
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          # Sonar needs full git history for "new code" blame attribution.
+          fetch-depth: 0
 
       - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
 
@@ -31,9 +43,17 @@ jobs:
       # pygobject → pycairo (needs system cairo to build; not on the runner).
       - run: uv venv
 
-      - run: uv pip install -e . pytest pytest-xdist
+      - run: uv pip install -e . pytest pytest-xdist pytest-cov
 
-      - run: uv run --no-project pytest -n auto -v
+      # Emit coverage.xml (repo-relative paths via coverage's relative_files) for
+      # SonarCloud; --cov enforces the fail_under=95 gate in pyproject.toml.
+      - run: uv run --no-project pytest -n auto --cov=reachy_mini_mcp --cov-report=xml:coverage.xml --cov-report=term -v
+
+      - name: SonarCloud Scan
+        if: env.SONAR_TOKEN != ''
+        uses: SonarSource/sonarqube-scan-action@fd88b7d7ccbaefd23d8f36f73b59db7a3d246602 # v6
+        env:
+          SONAR_HOST_URL: https://sonarcloud.io
 
   test-publish:
     # Skip on fork PRs — no OIDC/environment context is available there, so

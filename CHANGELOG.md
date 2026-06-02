@@ -4,6 +4,22 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] - 2026-06-03
+
+### Added
+
+- Test pipeline now generates coverage.xml and runs a SonarCloud scan in CI (publish.yml test job), guarded by SONAR_TOKEN so token-less and fork PRs stay green.
+- sonar-project.properties (projectKey agentculture_reachy_mini_mcp) wiring SonarCloud coverage decoration; robot runtime is coverage-excluded but kept indexed for static analysis.
+- Manager-CLI unit tests for serve lazy-import, doctor checks, overview render, dispatch/error routing, _meta/_output helpers, client-config edge cases, and the __main__ entrypoint.
+
+### Changed
+
+- Coverage gate: pyproject.toml [tool.coverage.report] now sets fail_under = 95; CLI-manager coverage raised from 84% to ~99%.
+
+### Fixed
+
+- publish.yml `paths:` filter now also triggers on `sonar-project.properties` and the workflow file itself, so Sonar/coverage-config changes can't silently skip CI (Qodo review, PR #13).
+
 ## [0.1.0] - 2026-06-02
 
 ### Added

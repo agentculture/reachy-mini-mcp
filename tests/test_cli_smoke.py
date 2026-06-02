@@ -52,6 +52,13 @@ def test_doctor_passes_hard_checks(monkeypatch):
     assert main(["doctor"]) == 0
 
 
+def test_show_entry_only(capsys):
+    assert main(["show", "--entry-only"]) == 0
+    out = capsys.readouterr().out
+    assert '"command"' in out
+    assert '"mcpServers"' not in out
+
+
 def test_install_uninstall_roundtrip(tmp_path, capsys):
     cfg = tmp_path / "mcp.json"
     assert main(["install", "--path", str(cfg)]) == 0
@@ -59,6 +66,36 @@ def test_install_uninstall_roundtrip(tmp_path, capsys):
     assert "reachy-mini" in cfg.read_text()
     assert main(["uninstall", "--path", str(cfg)]) == 0
     assert "reachy-mini" not in cfg.read_text()
+
+
+def test_install_dry_run_does_not_write(tmp_path, capsys):
+    cfg = tmp_path / "mcp.json"
+    assert main(["install", "--path", str(cfg), "--dry-run"]) == 0
+    assert '"mcpServers"' in capsys.readouterr().out
+    assert not cfg.exists()
+
+
+def test_install_idempotent_reports_no_change(tmp_path, capsys):
+    cfg = tmp_path / "mcp.json"
+    assert main(["install", "--path", str(cfg)]) == 0
+    capsys.readouterr()
+    assert main(["install", "--path", str(cfg)]) == 0
+    assert "already registered" in capsys.readouterr().err
+
+
+def test_uninstall_dry_run_keeps_entry(tmp_path, capsys):
+    cfg = tmp_path / "mcp.json"
+    assert main(["install", "--path", str(cfg)]) == 0
+    capsys.readouterr()
+    assert main(["uninstall", "--path", str(cfg), "--dry-run"]) == 0
+    assert "reachy-mini" in cfg.read_text()  # dry-run did not remove it
+
+
+def test_uninstall_nothing_to_do(tmp_path, capsys):
+    cfg = tmp_path / "mcp.json"
+    cfg.write_text('{"mcpServers": {}}', encoding="utf-8")
+    assert main(["uninstall", "--path", str(cfg)]) == 0
+    assert "nothing to do" in capsys.readouterr().err
 
 
 def test_manager_does_not_import_robot_stack():
