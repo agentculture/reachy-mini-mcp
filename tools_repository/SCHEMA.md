@@ -35,6 +35,7 @@ This document describes the schema for defining tools in the repository.
 ## Execution Type
 
 All tools use script files for execution:
+
 - `type`: "script"
 - `script_file`: Relative path to script file from tools_repository/scripts/
 - The script should define an async `execute(make_request, create_head_pose, params)` function
@@ -43,6 +44,7 @@ All tools use script files for execution:
 ## Examples
 
 ### Simple GET Request
+
 ```json
 {
   "name": "get_robot_state",
@@ -59,6 +61,7 @@ All tools use script files for execution:
 ```
 
 ### Complex Operation (Script)
+
 ```json
 {
   "name": "express_emotion",
@@ -79,4 +82,3 @@ All tools use script files for execution:
   }
 }
 ```
-

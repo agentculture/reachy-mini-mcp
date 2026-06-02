@@ -1,4 +1,4 @@
-@# Reachy Mini MCP Server
+# Reachy Mini MCP Server
 
 A Model Context Protocol (MCP) server for controlling the [Reachy Mini](https://github.com/pollen-robotics/reachy_mini) robot using [FastMCP](https://github.com/jlowin/fastmcp).
 
@@ -17,14 +17,16 @@ This MCP server provides a comprehensive set of tools to control Reachy Mini's h
 ## Roadmap
 
 ### MCP
+
 - [ ] Speech: TTS, piper
 - [ ] Agentic layer
 - [ ] Queue actions support
 - [ ] Interruption support
 - [ ] Move body support, reachy-mini python SDK
 
-### Conversation app 
-- [ ] Hearing: 
+### Conversation app
+
+- [ ] Hearing:
   - [ ] VAD, WebRTCVAD / SileroVAD
   - [ ] STT, faster-whisper
 - [ ] Vision
@@ -33,15 +35,13 @@ This MCP server provides a comprehensive set of tools to control Reachy Mini's h
   - [ ] Vector DB
   - [ ] Vector Graph DB
 - [ ] Growth, nightly fine tunes support
-- [ ] MQTT support 
+- [ ] MQTT support
 - [ ] Move to [autonomous-intelligence](https://github.com/OriNachum/autonomous-intelligence) repo
-
-
-
 
 ## Features
 
 ### Movement & Speech Control
+
 - **Head Control**: Move the head in 3D space (x, y, z) with orientation (roll, pitch, yaw)
 - **Antenna Control**: Control left and right antennas independently
 - **Speech (TTS)**: Make the robot speak while performing actions (via `speech` parameter)
@@ -50,12 +50,14 @@ This MCP server provides a comprehensive set of tools to control Reachy Mini's h
 - **Direction Looking**: Make the robot look in specific directions (up, down, left, right)
 
 ### Monitoring & Control
+
 - **State Monitoring**: Get full robot state, head state, antenna state, camera state
 - **Power Management**: Turn robot on/off
 - **Emergency Stop**: Immediately halt all movements
 - **Health Status**: Monitor robot health and system status
 
 ### Advanced Features
+
 - **Command Sequences**: Execute multiple robot operations in a single call (NEW!)
 - **Single Unified Interface**: Access all functionality through one `operate_robot` tool
 - **Repository-Based Tools**: Easily extensible tool system with JSON definitions
@@ -83,6 +85,7 @@ pip install -r requirements.txt
 ```
 
 This will install:
+
 - `fastmcp`: MCP server framework
 - `httpx`: HTTP client for API communication
 - `reachy-mini`: Reachy Mini SDK (optional, for direct Python control)
@@ -106,6 +109,7 @@ python server.py
 ```
 
 Or use FastMCP directly:
+
 ```bash
 fastmcp run server.py
 ```
@@ -126,6 +130,7 @@ This MCP server exposes **one MCP tool** that provides access to all robot contr
 This unified interface allows you to call any of the robot control operations either individually or as a sequence:
 
 **Single Command Mode:**
+
 ```python
 # Example: Get robot state
 operate_robot("get_robot_state")
@@ -138,6 +143,7 @@ operate_robot("move_head", {"z": 10, "duration": 2.0, "mm": True})
 ```
 
 **Sequence Mode (NEW!):**
+
 ```python
 # Example: Execute multiple commands in sequence
 operate_robot(commands=[
@@ -313,6 +319,7 @@ For more details on command sequences, see [SEQUENCE_COMMANDS.md](SEQUENCE_COMMA
 To use this MCP server, add the following to your MCP configuration file:
 
 ### macOS/Linux
+
 Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ```json
@@ -330,6 +337,7 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 ```
 
 ### Windows
+
 Edit `%APPDATA%\Claude\claude_desktop_config.json`:
 
 ```json
@@ -354,7 +362,7 @@ The server includes helpful prompts:
 
 ## Architecture
 
-```
+```text
 ┌─────────────────┐         ┌──────────────────┐         ┌─────────────────┐
 │  MCP Client     │◄───────►│  FastMCP Server  │◄───────►│ Reachy Daemon   │
 │  (Claude, etc)  │  stdio  │  (server.py)     │  HTTP   │  (localhost:8000)│
@@ -366,6 +374,7 @@ The server includes helpful prompts:
                                                           │  Robot/Sim      │
                                                           └─────────────────┘
 ```
+
 ## Development
 
 ### Repository-Based Tool System
@@ -373,13 +382,15 @@ The server includes helpful prompts:
 This MCP server uses a **repository-based approach** for defining tools, making it highly extensible and customizable. Tools are defined in JSON files rather than hardcoded in Python.
 
 **Key Benefits:**
+
 - ✅ Add new tools without modifying server code
 - ✅ Customize tool behavior by editing JSON files
 - ✅ Easy to version control and share tool definitions
 - ✅ Script-based execution for complex operations
 
 **Repository Structure:**
-```
+
+```text
 tools_repository/
 ├── tools_index.json          # Root file listing all tools
 ├── *.json                    # Individual tool definitions
@@ -426,6 +437,7 @@ Then create a JSON file (e.g., `tools_repository/my_tool.json`):
 ```
 
 Add to `tools_repository/tools_index.json`:
+
 ```json
 {
   "name": "my_tool",
@@ -463,6 +475,7 @@ Contributions are welcome! Please feel free to submit issues or pull requests.
 ## Support
 
 For issues related to:
+
 - **This MCP server**: Open an issue in this repository
 - **Reachy Mini robot**: Visit [Reachy Mini GitHub Issues](https://github.com/pollen-robotics/reachy_mini/issues)
 
@@ -471,5 +484,3 @@ For issues related to:
 - Built with [FastMCP](https://github.com/jlowin/fastmcp) by Marvin
 - For [Reachy Mini](https://github.com/pollen-robotics/reachy_mini) by Pollen Robotics & Hugging Face
 - Follows the [Model Context Protocol](https://modelcontextprotocol.io/) specification
-
-
