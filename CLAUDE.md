@@ -2,31 +2,104 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## What this project is
+## What this is
 
-`reachy-mini-mcp` is a **Model Context Protocol (MCP) server for controlling the
-[Reachy Mini](https://github.com/pollen-robotics/reachy_mini) expressive robot**
-(Pollen Robotics), built on [FastMCP](https://github.com/jlowin/fastmcp). It lets
-an MCP client (Claude Desktop, an agent, etc.) drive the robot's head, antennas,
-emotions, and gestures, and speak through a text-to-speech queue.
+A control layer for the [Reachy Mini](https://github.com/pollen-robotics/reachy_mini) robot. Nothing here drives motors directly — every action is an HTTP call to the **Reachy Mini daemon** (default `http://localhost:8000`), which must be running separately. This repo exposes the daemon's capabilities to LLMs two ways, both backed by one shared tool repository:
 
-The server exposes a **single meta-tool**, `operate_robot`, rather than one MCP tool
-per action (`server.py:612` registers only `operate_robot`). Call it with a single
-action or a sequence:
+- **`server.py`** — a FastMCP (stdio) MCP server. Exposes exactly **one** MCP tool, `operate_robot`, a meta-tool that dispatches to every robot operation by name. Individual tools are loaded into an in-process registry but deliberately *not* surfaced as separate MCP tools.
+- **`server_openai.py`** — a FastAPI HTTP server (port **8100**) that speaks an OpenAI-ish dialect: `GET /tools`, `POST /execute_tool`, `POST /v1/chat/completions`. Here each tool *is* exposed individually in OpenAI function-calling format.
 
-```python
-operate_robot(tool_name="express_emotion", parameters={"emotion": "happy", "speech": "Hello!"})
-operate_robot(commands=[{"tool_name": "turn_on_robot"}, {"tool_name": "nod_head"}])
+```text
+MCP client / HTTP client  →  server.py | server_openai.py  →  Reachy daemon (:8000)  →  robot/sim
 ```
 
-A `"speech"` parameter on any command is spoken aloud via the TTS queue. The server
-also publishes MCP resources (`reachy://status`, `reachy://capabilities`) and prompts.
+Beyond the robot-control layer, this repo is also an **AgentCulture mesh agent** —
+its mesh identity and vendored skill kit are described under [Mesh identity](#mesh-identity-agentculture)
+and [Skills](#skills) below.
 
-As of this onboarding the repo is also an **AgentCulture mesh agent** (see Identity).
+## Commands
 
-## Identity
+```bash
+# First-time setup (creates .venv, installs requirements.txt, offers MuJoCo sim deps)
+./setup.sh
 
-Declared in `culture.yaml`:
+# MCP server (stdio) — requires the daemon running first
+./start.sh                 # wraps: source .venv/bin/activate && python server.py
+python server.py
+fastmcp run server.py
+
+# OpenAI-compatible HTTP server on :8100 (uses requirements-openai.txt)
+./start_openai_server.sh
+python server_openai.py
+
+# Piper TTS voice model download helper
+./setup_piper_model.sh
+```
+
+There is **no test suite**. The README references `python test_repository.py`, but that file does not exist in the repo — don't try to run it. Likewise `docs/conversation_stack.md`, `DOCKER_SETUP.md`, and `SEQUENCE_COMMANDS.md` are linked from the README but are not present.
+
+## The tool repository (the core abstraction)
+
+Tools are data + a script, not hardcoded Python. To add or change a robot operation you edit `tools_repository/`, never the server files:
+
+```text
+tools_repository/
+├── tools_index.json     # registry: name → definition_file, with enabled flag
+├── <tool>.json          # parameter schema + which script runs it
+└── scripts/<tool>.py    # the actual logic
+```
+
+Loading flow (duplicated in both servers): `tools_index.json` → each `<tool>.json` → dynamically import `scripts/<tool>.py` via `importlib`. Every script must define:
+
+```python
+async def execute(make_request, create_head_pose, tts_queue, params):
+    ...
+    return {...}   # Dict[str, Any]
+```
+
+- `make_request(method, endpoint, json_data=, params=)` — the daemon HTTP helper. Movement goes through `POST /api/move/goto` with `{"head_pose": ..., "antennas": [...], "duration": ...}`; state via `GET /api/state/full`.
+- `create_head_pose(x, y, z, roll, pitch, yaw, degrees=False, mm=False)` — builds a pose dict. When `mm=True` it converts mm→meters; when `degrees=True` it converts degrees→radians. The daemon wants **meters and radians**; antennas are passed directly in radians (e.g. `math.radians(30)`).
+- `tts_queue` — may be `None` if Piper isn't configured. Always guard: `if speech and tts_queue:`.
+
+The `execute()` signature takes **four** args — `tts_queue` is the third (it may be `None` if Piper isn't configured, so guard with `if speech and tts_queue:`). Inline-code execution was removed entirely for security (see `INLINE_REMOVAL_SUMMARY.md`); only `"type": "script"` is supported.
+
+To register a new tool: add the script + JSON, then add an entry to `tools_index.json` and restart the server.
+
+## `operate_robot` semantics
+
+This meta-tool has two modes and some implicit behavior worth knowing:
+
+- **Single:** `operate_robot(tool_name="...", parameters={...})`. After the call it automatically appends a `get_robot_state` and returns it under `robot_state`.
+- **Sequence:** `operate_robot(commands=[{tool_name, parameters}, ...])`. Runs sequentially; a failing command does **not** abort the rest; a `get_robot_state` is auto-appended as a final result.
+- Tool names must match exactly (`get_robot_state`, not `get_robot_status`). Most action tools accept an optional `speech` string that is spoken via TTS while the action runs.
+
+## Two servers, one set of machinery — keep them in sync
+
+`server.py` and `server_openai.py` each contain their own copy of `create_head_pose`, `make_request`, and the tool-loading functions. A fix to loading/dispatch logic generally needs to be applied to **both**. Known divergences to be aware of:
+
+- `server.py` reads `REACHY_BASE_URL` from the environment; `server_openai.py` **hardcodes** `http://localhost:8000`.
+- `server.py` builds an `inspect.Signature` with type annotations for each tool (FastMCP introspects it); `server_openai.py` doesn't need that and builds an OpenAI JSON schema instead.
+- `server_openai.py`'s `/v1/chat/completions` is a **stub** — naive keyword matching ("turn on" → `turn_on_robot`), not a real LLM. Real LLM reasoning is expected to come from an upstream model (e.g. the vLLM containers) that then calls `/execute_tool`.
+
+## Configuration
+
+Copy `.env.example` (MCP/TTS) or `.env.openai.example` (HTTP/LLM) to `.env`. `.env` is gitignored. Key vars: `REACHY_BASE_URL`, `PIPER_MODEL` (path **without** `.onnx`), `AUDIO_DEVICE` (ALSA device, find via `aplay -L`), and `HF_TOKEN` for the Docker stack.
+
+TTS (`tts_queue.py`) shells out to the `piper` executable and plays WAVs with `aplay` on a background thread. If `piper`/`aplay` or a model is missing, TTS init fails gracefully and `speech` params are silently ignored.
+
+## The conversation stack (Docker) — partially present
+
+`docker-compose-vllm.yml` describes the full autonomous-robot deployment: two vLLM servers (front `:8100`, action `:8200`, both Llama-3.2-3B-Instruct-FP8), the reachy daemon, a hearing service, and a conversation app. **Be aware:** the application source it mounts (`conversation_app/`, `hearing_app/`) was removed from the repo (commit "remove app files (#8)") and lives elsewhere now — the compose file references directories that no longer exist here. Treat this file as a deployment reference, not something runnable as-is from this repo.
+
+## Other directories
+
+- `agents/reachy/reachy.system.md` — the robot's persona / system prompt for the LLM driving `operate_robot`.
+- `dance_moves/*.json` — despite the `.json` extension these are **captured LLM debug transcripts** (example `operate_robot` command sequences with parse logs), not structured config. Useful as examples of expected tool-call output, not as data to load.
+- `_config.yml` — Jekyll config for the GitHub Pages project site; unrelated to the Python servers.
+
+## Mesh identity (AgentCulture)
+
+This repo is also an **AgentCulture mesh agent**, declared in `culture.yaml`:
 
 ```yaml
 agents:
@@ -39,47 +112,14 @@ Together they satisfy the two invariants `steward doctor` verifies:
 **prompt-file-present** (an agent is declared and the matching prompt file is on
 disk) and **backend-consistency** (`claude` ↔ `CLAUDE.md`).
 
-Sign mesh/issue posts as `- reachy-mini-mcp (Claude)` — the `cicd` / `communicate`
-scripts resolve the nick from `culture.yaml` automatically (via
-`_resolve-nick.sh` / `agtag`), so don't hand-author the trailing signature.
+Note the two distinct prompts: **this file** is the *dev / mesh* prompt (guidance for
+Claude Code working **on** the repo), while **`agents/reachy/reachy.system.md`** is the
+robot's *runtime* persona that drives `operate_robot`. Different files, different
+audiences — editing one is not editing the other.
 
-## Two distinct prompts (important)
-
-- **This file (`CLAUDE.md`)** is the *dev / mesh* system prompt — guidance for Claude
-  Code working **on** this repository.
-- **`agents/reachy/reachy.system.md`** is the robot's *runtime* personality prompt
-  ("You are a cute robot called Reachy Mini…") loaded into the conversation agent that
-  drives the physical robot.
-
-They are different files for different audiences. Editing one is not editing the other.
-
-## Architecture / Layout
-
-```text
-server.py                 FastMCP server; the operate_robot meta-tool + TOOL_REGISTRY,
-                          loads tool definitions from tools_repository/ at startup
-server_openai.py          OpenAI-compatible server variant
-tts_queue.py              piper-TTS background queue (speaks text passed via "speech")
-tools_repository/         the extensible tool system
-  tools_index.json        index of the 18 robot operations
-  <tool>.json (x18)       per-tool MCP-style definitions
-  scripts/<tool>.py (x18) one Python script per tool (script-based execution)
-  README.md, SCHEMA.md    tool-definition format docs
-dance_moves/              JSON dance sequences
-agents/reachy/            reachy.system.md — the robot runtime prompt (see above)
-requirements.txt          fastmcp, httpx, reachy-mini, mcp, piper-tts, pyaudio
-.claude/skills/           vendored AgentCulture skill kit (cite-don't-import)
-docs/skill-sources.md     skill provenance ledger
-culture.yaml              mesh identity (suffix + backend)
-```
-
-The 18 operations cover state/monitoring (`get_robot_state`, `get_head_state`,
-`get_antennas_state`, `get_power_state`, `get_health_status`), power
-(`turn_on_robot`, `turn_off_robot`), head motion (`move_head`, `reset_head`,
-`nod_head`, `shake_head`, `tilt_head`, `look_at_direction`), antennas
-(`move_antennas`, `reset_antennas`), expression (`express_emotion`,
-`perform_gesture`), and safety (`stop_all_movements`). All tools execute as standalone
-Python scripts — inline code execution was removed (see `INLINE_REMOVAL_SUMMARY.md`).
+Sign mesh / issue posts as `- reachy-mini-mcp (Claude)` — the `cicd` / `communicate`
+scripts resolve the nick from `culture.yaml` automatically (via `_resolve-nick.sh` /
+`agtag`), so don't hand-author the trailing signature.
 
 ## Skills
 
@@ -89,40 +129,18 @@ cite-don't-import). Provenance and the re-sync procedure live in
 `assign-to-workforce`) originate in `devague`, and `outsource` originates in
 `convertible` — all re-broadcast via guildmaster.
 
-Tooling prerequisites: **`devex`** (>=0.21) on PATH (the `cicd` skill delegates the
-PR lifecycle to `devex pr`) and **`agtag`** (>=0.1) on PATH (the `communicate` skill
-wraps `agtag issue`); **`convertible`** on PATH is *optional* — only the `outsource`
-skill needs it, and only when invoked.
+Tooling prerequisites: **`devex`** (>=0.21) on PATH (the `cicd` skill delegates the PR
+lifecycle to `devex pr`) and **`agtag`** (>=0.1) on PATH (the `communicate` skill wraps
+`agtag issue`); **`convertible`** on PATH is *optional* — only the `outsource` skill
+needs it, and only when invoked.
 
-This repo is a FastMCP server driven by `requirements.txt`, **not** a Python
-package/CLI. Several kit skills assume a `pyproject.toml` / tests / PyPI / SonarCloud
-project that does not exist here yet — `version-bump`, `run-tests`, `sonarclaude`,
+Several kit skills assume a `pyproject.toml` / tests / PyPI / SonarCloud project that
+this repo does not have — `version-bump`, `run-tests`, `sonarclaude`,
 `pypi-maintainer`, and the SonarCloud/PyPI parts of `cicd` are therefore **dormant**
 (vendored for kit completeness and mesh uniformity). The `cicd` PR lifecycle
 (`devex pr` open/read/reply/delta), `communicate`, `outsource`, and the devague
 workflow trio work today.
 
-## Conventions
-
-- The vendored `.claude/skills/` are cited **verbatim** — do not reformat or edit
-  their scripts; re-sync from guildmaster instead (see `docs/skill-sources.md`).
-- PRs go through the `cicd` skill (`devex pr`). Markdownlint config ignores
-  `.claude/skills/**` (vendored, never reformatted).
-- This repo has **no version-bump merge gate and no PyPI deploy** — do not add claims
-  of either to docs until the corresponding scaffolding actually lands.
-
-## Running
-
-```bash
-pip install -r requirements.txt        # see setup.sh / setup.ps1 for full setup
-./setup_piper_model.sh                 # download the piper TTS voice model
-./start.sh                             # start the MCP server (stdio)
-./start_openai_server.sh               # start the OpenAI-compatible variant
-```
-
-`mcp.stdio.example.json` is a sample MCP client config. `start_daemon.sh` /
-`shutdown_daemon.sh` manage the Reachy Mini daemon.
-
-This file describes the repository **as it exists on disk today**. When you edit, keep
-claims grounded in checked-in reality; mark anything aspirational `(planned)` or move
-it under a `## Roadmap` heading (the README tracks the project roadmap).
+The vendored `.claude/skills/` are cited **verbatim** — do not reformat or edit their
+scripts; re-sync from guildmaster instead (see `docs/skill-sources.md`). The
+markdownlint config ignores `.claude/skills/**` for this reason.

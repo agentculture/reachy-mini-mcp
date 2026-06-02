@@ -4,7 +4,7 @@ This directory contains the repository-based tool definitions for the Reachy Min
 
 ## Repository Structure
 
-```
+```text
 tools_repository/
 ├── tools_index.json          # Root file listing all available tools
 ├── SCHEMA.md                 # Documentation of the JSON schema
@@ -40,6 +40,7 @@ The root file that lists all available tools:
 ### 2. Tool Definition Files
 
 Each tool has its own JSON file defining:
+
 - **Name**: Tool identifier
 - **Description**: What the tool does
 - **Parameters**: Required and optional parameters
@@ -65,8 +66,9 @@ Example (`get_robot_state.json`):
 ### 3. Execution Type
 
 All tools use script files for execution:
+
 - All operations are in separate Python files
-- Define an `async def execute(make_request, create_head_pose, params)` function
+- Define an `async def execute(make_request, create_head_pose, tts_queue, params)` function
 - Located in `scripts/` directory
 
 ## Adding a New Tool
@@ -79,26 +81,32 @@ All tools use script files for execution:
 """Script for my complex tool."""
 import asyncio
 
-async def execute(make_request, create_head_pose, params):
+async def execute(make_request, create_head_pose, tts_queue, params):
     """
     Perform a complex operation.
-    
+
     Args:
         make_request: Function to make HTTP requests
         create_head_pose: Function to create head pose
+        tts_queue: TTS queue for speech (may be None if Piper is not configured)
         params: Dictionary with all parameters
     """
+    # Optional speech: tts_queue may be None, so guard it
+    speech = params.get("speech")
+    if speech and tts_queue:
+        await tts_queue.enqueue_text(speech)
+
     # Step 1
     await make_request("POST", "/api/endpoint1", json_data={...})
     await asyncio.sleep(1.0)
-    
+
     # Step 2
     await make_request("POST", "/api/endpoint2", json_data={...})
-    
+
     return {"status": "success"}
 ```
 
-2. Create the JSON definition (`my_complex_tool.json`):
+1. Create the JSON definition (`my_complex_tool.json`):
 
 ```json
 {
@@ -121,7 +129,7 @@ async def execute(make_request, create_head_pose, params):
 }
 ```
 
-3. Add to `tools_index.json` and restart the server.
+1. Add to `tools_index.json` and restart the server.
 
 ## Modifying Existing Tools
 
@@ -154,6 +162,7 @@ python test_repository.py
 ```
 
 This verifies:
+
 - Tool index is valid JSON
 - All definition files exist and are valid
 - Script files exist for script-based tools
@@ -164,19 +173,35 @@ This verifies:
 When writing scripts, you have access to:
 
 ### `make_request(method, endpoint, json_data=None, params=None)`
+
 Make HTTP requests to the Reachy daemon:
+
 ```python
 await make_request("GET", "/api/state/full")
 await make_request("POST", "/api/move/goto", json_data={"head_pose": pose, "duration": 2.0})
 ```
 
 ### `create_head_pose(x, y, z, roll, pitch, yaw, degrees=False, mm=False)`
+
 Create head pose configurations:
+
 ```python
 pose = create_head_pose(z=10, pitch=-15, degrees=True, mm=True)
 ```
 
+### `tts_queue`
+
+Optional text-to-speech queue, passed as the third argument to `execute()`. It may be
+`None` when Piper TTS is not configured, so always guard before use:
+
+```python
+speech = params.get("speech")
+if speech and tts_queue:
+    await tts_queue.enqueue_text(speech)
+```
+
 ### Standard Libraries
+
 - `math`: Mathematical functions
 - `asyncio`: Async operations (sleep, etc.)
 - `httpx`: HTTP client (imported but `make_request` preferred)
@@ -201,17 +226,19 @@ The original `server.py` had 18 hardcoded tools with `@mcp.tool()` decorators. T
 ## Troubleshooting
 
 **Tool not loading?**
+
 - Check `tools_index.json` has the tool listed with `"enabled": true`
 - Verify the definition file exists and has valid JSON
 - Run `python test_repository.py` to validate
 
 **Script file errors?**
+
 - Ensure script file exists in `scripts/` directory
 - Check the `execute()` function signature is correct
 - Verify async/await is used properly
 
 **Parameters not working?**
+
 - Check parameter names match between JSON and code
 - Use `params.get('param_name')` to access parameters
 - Remember to provide defaults for optional parameters
-
