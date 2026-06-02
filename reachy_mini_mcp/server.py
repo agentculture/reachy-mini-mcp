@@ -10,6 +10,7 @@ This version uses a repository-based approach for defining tools dynamically.
 """
 
 import sys
+import contextlib
 import httpx
 import json
 import os
@@ -192,8 +193,12 @@ def create_tool_function(tool_def: Dict[str, Any]):
         module = load_script_module(script_file)
         
         async def tool_func_impl(*args, **kwargs):
-            # Call the execute function from the script
-            return await module.execute(make_request, create_head_pose, tts_queue, kwargs)
+            # Call the execute function from the script. Redirect stdout to stderr
+            # so a tool script's stray print() can't corrupt the MCP stdio
+            # JSON-RPC channel (mcp.run() keeps writing protocol frames to the
+            # real stdout).
+            with contextlib.redirect_stdout(sys.stderr):
+                return await module.execute(make_request, create_head_pose, tts_queue, kwargs)
         
         # Create a new function with the proper signature and annotations
         tool_func_impl.__signature__ = inspect.Signature(params)
@@ -635,8 +640,6 @@ def main() -> None:
     """Console entry point (``reachy-mini-mcp serve``): load tools, then run the
     FastMCP stdio server. Banner output is routed to stderr because stdout is
     the MCP stdio protocol channel and must stay clean."""
-    import contextlib
-
     with contextlib.redirect_stdout(sys.stderr):
         initialize_server()
     mcp.run()
@@ -646,7 +649,5 @@ if __name__ == "__main__":
     main()
 else:
     # Support `fastmcp run reachy_mini_mcp/server.py` — register tools at import.
-    import contextlib as _contextlib
-
-    with _contextlib.redirect_stdout(sys.stderr):
+    with contextlib.redirect_stdout(sys.stderr):
         initialize_server()

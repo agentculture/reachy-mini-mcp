@@ -29,9 +29,20 @@ project adheres to [Semantic Versioning](https://semver.org/).
   `server_openai.py`, `tts_queue.py`, `tools_repository/`). Cross-module imports
   updated accordingly; both servers gained a `main()` entry point.
 - The MCP server's banner output now goes to stderr so it cannot corrupt the
-  stdio protocol channel.
+  stdio protocol channel. This also covers TTS diagnostics (`tts_queue.py` prints
+  + the background playback thread) and tool-script output (tool `execute()` runs
+  under `redirect_stdout(stderr)`), so enabling `speech` can't break the channel.
 - `mcp.stdio.example.json`, `start.sh`, `start_openai_server.sh`, and `setup.sh`
   updated for the package layout and the console script.
+
+### Fixed
+
+- `server_openai.py` now honors `REACHY_BASE_URL` from the environment instead of
+  hardcoding `http://localhost:8000`, so `serve --openai` reaches non-local
+  daemons (matches `server.py`).
+- `doctor`'s optional-dependency probe uses `importlib.util.find_spec` instead of
+  `__import__`, so it reports availability without importing heavy modules or
+  polluting `sys.modules`.
 
 ### Removed
 

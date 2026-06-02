@@ -9,6 +9,7 @@ install); a stopped daemon or a missing optional extra is a warning.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import shutil
@@ -54,13 +55,17 @@ def _tools_check() -> Check:
     return Check("tools", _OK, f"{enabled} enabled / {total} total in {td}")
 
 
+def _available(module: str) -> bool:
+    """Whether ``module`` is importable, checked via ``find_spec`` so we don't
+    actually import it (no side effects, no sys.modules pollution)."""
+    try:
+        return importlib.util.find_spec(module) is not None
+    except (ImportError, ValueError):
+        return False
+
+
 def _import_check(label: str, modules: List[str], extra: str) -> Check:
-    missing = []
-    for mod in modules:
-        try:
-            __import__(mod)
-        except ImportError:
-            missing.append(mod)
+    missing = [mod for mod in modules if not _available(mod)]
     if not missing:
         return Check(label, _OK, "installed")
     return Check(

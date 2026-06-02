@@ -16,6 +16,7 @@ Requirements:
 import asyncio
 import re
 import subprocess
+import sys
 import tempfile
 import traceback
 from pathlib import Path
@@ -27,6 +28,17 @@ from dotenv import load_dotenv
 
 # Load environment variables from .env file if available
 load_dotenv()
+
+
+def _log(*args, **kwargs):
+    """All TTS diagnostics go to stderr.
+
+    When this server runs over MCP stdio, stdout is the JSON-RPC channel — any
+    stray text there corrupts the protocol. TTS prints from both the request
+    path and the background playback thread, so they must never touch stdout.
+    """
+    kwargs.setdefault("file", sys.stderr)
+    print(*args, **kwargs)
 
 
 class TTSQueue:
@@ -86,7 +98,7 @@ class TTSQueue:
                 # Look for .onnx model files (both in subdirectories and directly in the folder)
                 # First try files directly in the location
                 for model_file in location.glob("*.onnx"):
-                    print(f"✓ Found default model: {model_file}")
+                    _log(f"✓ Found default model: {model_file}")
                     # For piper, we need to specify the path WITHOUT the .onnx extension
                     model_path = str(model_file.with_suffix(''))
                     return model_path
@@ -94,7 +106,7 @@ class TTSQueue:
                 # Then try subdirectories
                 for model_file in location.rglob("*.onnx"):
                     if model_file.parent != location:  # Skip files we already checked
-                        print(f"✓ Found default model: {model_file}")
+                        _log(f"✓ Found default model: {model_file}")
                         # For piper, we need to specify the path WITHOUT the .onnx extension
                         model_path = str(model_file.with_suffix(''))
                         return model_path
@@ -111,14 +123,14 @@ class TTSQueue:
                 timeout=5
             )
             if result.returncode == 0:
-                print(f"✓ piper found: {result.stdout.strip()}")
+                _log(f"✓ piper found: {result.stdout.strip()}")
             else:
-                print(f"⚠️  piper executable found but returned error")
+                _log(f"⚠️  piper executable found but returned error")
         except FileNotFoundError:
-            print(f"⚠️  piper not found at '{self.piper_executable}'")
-            print(f"   Please install from: https://github.com/OHF-Voice/piper-gpl")
+            _log(f"⚠️  piper not found at '{self.piper_executable}'")
+            _log(f"   Please install from: https://github.com/OHF-Voice/piper-gpl")
         except Exception as e:
-            print(f"⚠️  Error checking piper: {e}")
+            _log(f"⚠️  Error checking piper: {e}")
     
     def _start_playback_thread(self):
         """Start the background playback thread."""
@@ -142,31 +154,31 @@ class TTSQueue:
                 try:
                     os.unlink(audio_file)
                 except Exception as e:
-                    print(f"⚠️  Error deleting temp file {audio_file}: {e}")
+                    _log(f"⚠️  Error deleting temp file {audio_file}: {e}")
                 
                 self.audio_queue.task_done()
                 
             except Empty:
                 continue
             except Exception as e:
-                print(f"⚠️  Error in playback worker: {e}")
+                _log(f"⚠️  Error in playback worker: {e}")
     
     def _play_audio(self, audio_file: str):
         """Play an audio file using aplay."""
         try:
             self.is_playing = True
-            print(f"🔊 Playing audio: {audio_file}")
+            _log(f"🔊 Playing audio: {audio_file}")
             
             # Check if file exists and has content
             if not os.path.exists(audio_file):
-                print(f"⚠️  Audio file does not exist: {audio_file}")
+                _log(f"⚠️  Audio file does not exist: {audio_file}")
                 return
             
             file_size = os.path.getsize(audio_file)
-            print(f"   File size: {file_size} bytes")
+            _log(f"   File size: {file_size} bytes")
             
             if file_size == 0:
-                print(f"⚠️  Audio file is empty: {audio_file}")
+                _log(f"⚠️  Audio file is empty: {audio_file}")
                 return
             
             # Build aplay command
@@ -186,18 +198,18 @@ class TTSQueue:
             stdout, stderr = self.current_process.communicate()
             
             if self.current_process.returncode != 0:
-                print(f"⚠️  aplay returned error code: {self.current_process.returncode}")
+                _log(f"⚠️  aplay returned error code: {self.current_process.returncode}")
                 if stderr:
-                    print(f"   stderr: {stderr.decode('utf-8', errors='ignore')}")
+                    _log(f"   stderr: {stderr.decode('utf-8', errors='ignore')}")
             else:
-                print(f"   ✓ Playback completed")
+                _log(f"   ✓ Playback completed")
             
             self.current_process = None
             
         except Exception as e:
-            print(f"⚠️  Error playing audio: {e}")
+            _log(f"⚠️  Error playing audio: {e}")
             import traceback
-            traceback.print_exc()
+            traceback.print_exc(file=sys.stderr)
         finally:
             self.is_playing = False
     
@@ -244,13 +256,13 @@ class TTSQueue:
             if result.returncode == 0 and os.path.exists(output_path):
                 return output_path
             else:
-                print(f"⚠️  piper conversion failed: {result.stderr.decode('utf-8', errors='ignore')}")
+                _log(f"⚠️  piper conversion failed: {result.stderr.decode('utf-8', errors='ignore')}")
                 if os.path.exists(output_path):
                     os.unlink(output_path)
                 return None
                 
         except Exception as e:
-            print(f"⚠️  Error in text_to_speech: {e}")
+            _log(f"⚠️  Error in text_to_speech: {e}")
             return None
     
     def extract_quoted_text(self, text: str) -> List[str]:
@@ -286,7 +298,7 @@ class TTSQueue:
             else:
                 return
         
-        print(f"🔊 Enqueueing {len(quoted_texts)} TTS segment(s)...")
+        _log(f"🔊 Enqueueing {len(quoted_texts)} TTS segment(s)...")
         
         for quoted_text in quoted_texts:
             # Convert to speech
@@ -295,7 +307,7 @@ class TTSQueue:
             if audio_file:
                 # Add to playback queue
                 self.audio_queue.put(audio_file)
-                print(f"   ✓ Queued: \"{quoted_text[:50]}...\"" if len(quoted_text) > 50 else f"   ✓ Queued: \"{quoted_text}\"")
+                _log(f"   ✓ Queued: \"{quoted_text[:50]}...\"" if len(quoted_text) > 50 else f"   ✓ Queued: \"{quoted_text}\"")
     
     def clear_queue(self):
         """Clear all pending audio from the queue."""
@@ -325,7 +337,7 @@ class TTSQueue:
                     pass
             self.current_process = None
         
-        print("🔇 TTS queue cleared")
+        _log("🔇 TTS queue cleared")
     
     def cleanup(self):
         """Clean up resources."""
@@ -375,7 +387,7 @@ class AsyncTTSQueue:
 # Test function
 async def test_tts():
     """Test the TTS queue."""
-    print("Testing TTS Queue...")
+    _log("Testing TTS Queue...")
     
     # Get model from environment or use default search
     model_path = os.environ.get("PIPER_MODEL")
@@ -384,34 +396,34 @@ async def test_tts():
     try:
         tts = AsyncTTSQueue(voice_model=model_path, audio_device=audio_device)
     except ValueError as e:
-        print(f"\n❌ Error: {e}")
-        print("\nTo test TTS, either:")
-        print("  1. Set PIPER_MODEL environment variable:")
-        print("     export PIPER_MODEL=/path/to/model.onnx")
-        print("  2. Install a model to a default location:")
-        print("     ~/.local/share/piper/models/")
-        print("\nDownload models from: https://github.com/rhasspy/piper/releases")
+        _log(f"\n❌ Error: {e}")
+        _log("\nTo test TTS, either:")
+        _log("  1. Set PIPER_MODEL environment variable:")
+        _log("     export PIPER_MODEL=/path/to/model.onnx")
+        _log("  2. Install a model to a default location:")
+        _log("     ~/.local/share/piper/models/")
+        _log("\nDownload models from: https://github.com/rhasspy/piper/releases")
         return
     
     # Test text with quotes
     test_text = 'The robot says "Hello, I am ready to help you!" and also "How can I assist you today?"'
     
-    print(f"\nTest text: {test_text}\n")
+    _log(f"\nTest text: {test_text}\n")
     
     await tts.enqueue_text(test_text)
     
     # Wait for playback
-    print("\nWaiting for playback to complete...")
+    _log("\nWaiting for playback to complete...")
     await asyncio.sleep(10)
     
     # Clear queue
-    print("\nClearing queue...")
+    _log("\nClearing queue...")
     await tts.clear_queue()
     
     # Cleanup
     tts.cleanup()
     
-    print("\n✓ Test complete")
+    _log("\n✓ Test complete")
 
 
 if __name__ == "__main__":

@@ -103,7 +103,7 @@ This meta-tool has two modes and some implicit behavior worth knowing:
 
 `reachy_mini_mcp/server.py` and `reachy_mini_mcp/server_openai.py` each contain their own copy of `create_head_pose`, `make_request`, and the tool-loading functions. A fix to loading/dispatch logic generally needs to be applied to **both**. Both now also expose a `main()` entry point (called by `reachy-mini-mcp serve` / `serve --openai`). Known divergences to be aware of:
 
-- `server.py` reads `REACHY_BASE_URL` from the environment; `server_openai.py` **hardcodes** `http://localhost:8000`.
+- Both read `REACHY_BASE_URL` from the environment (defaulting to `http://localhost:8000`). (Historically `server_openai.py` hardcoded it; fixed in 0.1.0.)
 - `server.py` builds an `inspect.Signature` with type annotations for each tool (FastMCP introspects it); `server_openai.py` doesn't need that and builds an OpenAI JSON schema instead.
 - `server.py` is a **stdio** server, so its startup banner / tool-loading prints are routed to **stderr** (stdout is the JSON-RPC channel); `server_openai.py` is HTTP, so it prints freely.
 - `server_openai.py`'s `/v1/chat/completions` is a **stub** — naive keyword matching ("turn on" → `turn_on_robot`), not a real LLM. Real LLM reasoning is expected to come from an upstream model (e.g. the vLLM containers) that then calls `/execute_tool`.
