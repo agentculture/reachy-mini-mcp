@@ -1,0 +1,94 @@
+name: Publish to PyPI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "pyproject.toml"
+      - "reachy_mini_mcp/**"
+      - "tests/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - "pyproject.toml"
+      - "reachy_mini_mcp/**"
+      - "tests/**"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - run: uv python install 3.12
+
+      # Install ONLY the manager (deps=[]) + pytest. Avoids `uv sync`, whose
+      # universal resolve would pull the optional [server] extra → reachy-mini →
+      # pygobject → pycairo (needs system cairo to build; not on the runner).
+      - run: uv venv
+
+      - run: uv pip install -e . pytest pytest-xdist
+
+      - run: uv run --no-project pytest -n auto -v
+
+  test-publish:
+    # Skip on fork PRs — no OIDC/environment context is available there, so
+    # the publish step would fail and block external contributor CI.
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: test
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - run: uv python install 3.12
+
+      # No `uv sync` — `uv build` packages the source directly (hatchling), so we
+      # never resolve the optional [server] extra's heavy transitive deps.
+      - name: Set dev version
+        run: |
+          BASE=$(grep -m1 '^version = ' pyproject.toml | sed -E 's/version = "(.*)"/\1/')
+          DEV_VERSION="${BASE}.dev${{ github.run_number }}"
+          sed -i "s/^version = .*/version = \"${DEV_VERSION}\"/" pyproject.toml
+          echo "DEV_VERSION=${DEV_VERSION}" >> "$GITHUB_ENV"
+          echo "Publishing ${DEV_VERSION} to TestPyPI"
+
+      - name: Build and publish to TestPyPI
+        run: |
+          uv build
+          uv publish --publish-url https://test.pypi.org/legacy/ --trusted-publishing always --check-url https://test.pypi.org/simple/
+
+      - name: Print install commands
+        if: always()
+        run: |
+          echo "::notice::Test with: uv tool install --index-url https://test.pypi.org/simple/ --index-strategy unsafe-best-match reachy-mini-mcp==${DEV_VERSION}"
+
+  publish:
+    if: github.event_name == 'push'
+    needs: test
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - run: uv python install 3.12
+
+      # No `uv sync` — see test-publish.
+      - name: Build and publish to PyPI
+        run: |
+          uv build
+          uv publish --trusted-publishing always --check-url https://pypi.org/simple/

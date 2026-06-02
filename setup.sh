@@ -68,10 +68,10 @@ echo ""
 echo "Upgrading pip..."
 pip install --upgrade pip
 
-# Install dependencies
+# Install the package (editable) with the server + TTS extras
 echo ""
-echo "Installing dependencies..."
-pip install -r requirements.txt
+echo "Installing reachy-mini-mcp (editable, with [server,tts] extras)..."
+pip install -e ".[server,tts]"
 
 # Optional: Install simulation dependencies
 echo ""
@@ -105,9 +105,12 @@ echo "   For simulation: reachy-mini-daemon --sim"
 echo "   For real robot: reachy-mini-daemon"
 echo ""
 echo "3. In a new terminal, start the MCP server:"
-echo "   python server.py"
+echo "   reachy-mini-mcp serve        # or: python -m reachy_mini_mcp serve"
 echo ""
-echo "4. Connect your MCP client (e.g., Claude Desktop)"
+echo "4. Register it with your MCP client:"
+echo "   reachy-mini-mcp show         # print the mcp.json snippet"
+echo "   reachy-mini-mcp install --client claude-desktop   # or claude-code / cursor"
+echo "   reachy-mini-mcp doctor       # verify the setup"
 echo ""
 
 

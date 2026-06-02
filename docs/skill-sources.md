@@ -23,24 +23,24 @@ seven skills whose guildmaster copy lacked it (`cicd`, `communicate`,
 
 ## Dormant skills
 
-reachy-mini-mcp is a FastMCP server driven by `requirements.txt` — **not** a
-Python package/CLI. Several kit skills assume a `pyproject.toml` / tests / PyPI /
-SonarCloud project that does not exist here yet. They are vendored whole (the
-canonical kit is vendored as a set, not curated) but are **dormant** until that
-scaffolding lands: `version-bump`, `run-tests`, `sonarclaude`, `pypi-maintainer`,
-and the SonarCloud/PyPI parts of `cicd`. The `cicd` PR lifecycle (`devex pr`),
-`communicate`, `outsource`, `agent-config`, and the devague workflow trio work
-today.
+As of the `0.1.0` packaging work, reachy-mini-mcp **is** now a Python package +
+CLI (`reachy-mini-mcp`) with a `pyproject.toml`, a `tests/` suite, and a
+PyPI/TestPyPI publish workflow. So `version-bump`, `run-tests`, and
+`pypi-maintainer` are **active**. Still **dormant**: `sonarclaude` and the
+SonarCloud parts of `cicd` (no SonarCloud project is wired). They are vendored
+whole regardless (the canonical kit is vendored as a set, not curated). The
+`cicd` PR lifecycle (`devex pr`), `communicate`, `outsource`, `agent-config`, and
+the devague workflow trio work today.
 
 | Skill | Upstream | Origin | Notes | Last synced |
 |-------|----------|--------|-------|-------------|
 | `cicd` | `../guildmaster/.claude/skills/cicd/` | guildmaster | CI/CD lane layered on `devex pr`: the 5 thin scripts (`workflow.sh`, `pr-status.sh`, `pr-reply.sh`, `_resolve-nick.sh`, `portability-lint.sh`) delegate lint/open/read/reply/delta to `devex` and add the `status` / `await` SonarCloud-gating extensions. Consumer-identifying prose (`guildmaster` → `reachy-mini-mcp`) adapted in the description + heading; upstream history (`Renamed from pr-review in steward 0.7.0; rebased on devex in 0.12.0`) and env-var literals (`STEWARD_*`) kept verbatim. The PR signature resolves at runtime from `culture.yaml` via `_resolve-nick.sh` (→ `reachy-mini-mcp`). Requires `devex` on PATH. **SonarCloud `status`/`await` extensions are dormant** (no Sonar project yet). | 2026-06-02 (guildmaster 0.9.2, `851732a`) |
 | `communicate` | `../guildmaster/.claude/skills/communicate/` | guildmaster | Cross-repo + mesh communication. Consumer-identifying prose adapted in the description (incl. the `- reachy-mini-mcp (Claude)` signature line). **No hard-coded signature literal in the scripts** — `post-issue.sh` is `agtag`-backed and resolves the signing nick from `culture.yaml`; requires `agtag` (>=0.1) on PATH. The supplier `scripts/templates/` (`skill-update-brief.md`) are kept verbatim — inert for a consumer (they cite guildmaster as upstream). Renamed from `coordinate` in steward 0.8.0; absorbed `gh-issues` in 0.9.1. | 2026-06-02 (guildmaster 0.9.2, `851732a`) |
-| `version-bump` | `../guildmaster/.claude/skills/version-bump/` | guildmaster | Pure-Python, CWD-aware (`scripts/bump.py`). Verbatim except added `type: command`. **Dormant** — bumps `pyproject.toml`, which this repo does not have. | 2026-06-02 (guildmaster 0.9.2, `851732a`) |
+| `version-bump` | `../guildmaster/.claude/skills/version-bump/` | guildmaster | Pure-Python, CWD-aware (`scripts/bump.py`). Verbatim except added `type: command`. **Active** as of 0.1.0 — bumps `pyproject.toml` + `CHANGELOG.md`. | 2026-06-02 (guildmaster 0.9.2, `851732a`) |
 | `agent-config` | `../guildmaster/.claude/skills/agent-config/` | guildmaster (origin steward) | Shows a Culture agent's full config; run `scripts/show.sh` directly (no `guild` binary required). `scripts/show.sh` + `data/backend-fingerprints.yaml` verbatim (already carried `type: command`). | 2026-06-02 (guildmaster 0.9.2, `851732a`) |
 | `doc-test-alignment` | `../guildmaster/.claude/skills/doc-test-alignment/` | guildmaster | **STUB** — `scripts/check.sh` exits not-yet-implemented; the contract lives in SKILL.md. Verbatim except added `type: command`. | 2026-06-02 (guildmaster 0.9.2, `851732a`) |
-| `pypi-maintainer` | `../guildmaster/.claude/skills/pypi-maintainer/` | guildmaster | Switch a package install between PyPI / TestPyPI / local editable (`scripts/switch-source.sh`). Verbatim except added `type: command`. **Dormant** — no PyPI package here. | 2026-06-02 (guildmaster 0.9.2, `851732a`) |
-| `run-tests` | `../guildmaster/.claude/skills/run-tests/` | guildmaster | pytest + xdist + coverage (`scripts/test.sh`). Verbatim except added `type: command`. **Dormant** — no `tests/` / `pyproject.toml` yet. | 2026-06-02 (guildmaster 0.9.2, `851732a`) |
+| `pypi-maintainer` | `../guildmaster/.claude/skills/pypi-maintainer/` | guildmaster | Switch a package install between PyPI / TestPyPI / local editable (`scripts/switch-source.sh`). Verbatim except added `type: command`. **Active** as of 0.1.0 — dist `reachy-mini-mcp`. | 2026-06-02 (guildmaster 0.9.2, `851732a`) |
+| `run-tests` | `../guildmaster/.claude/skills/run-tests/` | guildmaster | pytest + xdist + coverage (`scripts/test.sh`). Verbatim except added `type: command`. **Active** as of 0.1.0 — `tests/` covers the manager CLI. | 2026-06-02 (guildmaster 0.9.2, `851732a`) |
 | `sonarclaude` | `../guildmaster/.claude/skills/sonarclaude/` | guildmaster | SonarCloud API queries (`scripts/sonar.sh`). Verbatim except added `type: command`. **Dormant** — no Sonar project yet. | 2026-06-02 (guildmaster 0.9.2, `851732a`) |
 | `think` | `../guildmaster/.claude/skills/think/` | **devague** (re-broadcast via guildmaster) | idea→spec leg of the devague workflow chain. Verbatim (already carried `type: command`). Origin/broadcast prose left verbatim. | 2026-06-02 (guildmaster 0.9.2, `851732a`) |
 | `spec-to-plan` | `../guildmaster/.claude/skills/spec-to-plan/` | **devague** (re-broadcast via guildmaster) | spec→plan leg of the devague workflow chain. Verbatim (already carried `type: command`). | 2026-06-02 (guildmaster 0.9.2, `851732a`) |

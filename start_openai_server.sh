@@ -32,7 +32,7 @@ source .venv/bin/activate
 # Install/upgrade dependencies
 echo "Installing dependencies..."
 pip install -q --upgrade pip
-pip install -q -r requirements-openai.txt
+pip install -q -e ".[openai]"
 echo "✓ Dependencies installed"
 echo ""
 
@@ -64,4 +64,4 @@ echo ""
 echo "Press Ctrl+C to stop"
 echo ""
 
-python server_openai.py
+python -m reachy_mini_mcp serve --openai

@@ -9,6 +9,8 @@ The server communicates with the Reachy Mini daemon running on localhost:8000.
 This version uses a repository-based approach for defining tools dynamically.
 """
 
+import sys
+import contextlib
 import httpx
 import json
 import os
@@ -19,7 +21,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 from dotenv import load_dotenv
 from fastmcp import FastMCP
-from tts_queue import AsyncTTSQueue
+from reachy_mini_mcp.tts_queue import AsyncTTSQueue
 
 # Load environment variables from .env file
 load_dotenv()
@@ -191,8 +193,12 @@ def create_tool_function(tool_def: Dict[str, Any]):
         module = load_script_module(script_file)
         
         async def tool_func_impl(*args, **kwargs):
-            # Call the execute function from the script
-            return await module.execute(make_request, create_head_pose, tts_queue, kwargs)
+            # Call the execute function from the script. Redirect stdout to stderr
+            # so a tool script's stray print() can't corrupt the MCP stdio
+            # JSON-RPC channel (mcp.run() keeps writing protocol frames to the
+            # real stdout).
+            with contextlib.redirect_stdout(sys.stderr):
+                return await module.execute(make_request, create_head_pose, tts_queue, kwargs)
         
         # Create a new function with the proper signature and annotations
         tool_func_impl.__signature__ = inspect.Signature(params)
@@ -582,10 +588,20 @@ async def operate_robot(
 
 # Initialize and run
 
+_initialized = False
+
+
 def initialize_server():
-    """Initialize the server by loading all tools from the repository."""
-    global tts_queue
-    
+    """Initialize the server by loading all tools from the repository.
+
+    Idempotent: the module runs this at import time (so ``fastmcp run`` works)
+    and ``main()`` calls it again for the console entry point — the guard makes
+    the second call a no-op.
+    """
+    global tts_queue, _initialized
+    if _initialized:
+        return
+
     print("=" * 60)
     print("Reachy Mini MCP Server - Repository-Based Tool Loading")
     print("=" * 60)
@@ -617,13 +633,21 @@ def initialize_server():
     print("Server initialized and ready!")
     print("=" * 60)
 
+    _initialized = True
+
+
+def main() -> None:
+    """Console entry point (``reachy-mini-mcp serve``): load tools, then run the
+    FastMCP stdio server. Banner output is routed to stderr because stdout is
+    the MCP stdio protocol channel and must stay clean."""
+    with contextlib.redirect_stdout(sys.stderr):
+        initialize_server()
+    mcp.run()
+
 
 if __name__ == "__main__":
-    # Initialize the server and load all tools BEFORE FastMCP starts
-    initialize_server()
-    
-    # Run the MCP server
-    mcp.run()
+    main()
 else:
-    # If imported as a module, initialize immediately
-    initialize_server()
+    # Support `fastmcp run reachy_mini_mcp/server.py` — register tools at import.
+    with contextlib.redirect_stdout(sys.stderr):
+        initialize_server()

@@ -1,0 +1,104 @@
+[project]
+name = "reachy-mini-mcp"
+version = "0.1.0"
+description = "MCP server + manager CLI for the Reachy Mini robot."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [{name = "Ori Nachum"}]
+keywords = ["mcp", "reachy", "robot", "model-context-protocol", "fastmcp"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Scientific/Engineering",
+    "Intended Audience :: Developers",
+]
+# The MANAGER (show/explain/install/uninstall/overview/doctor) is pure stdlib, so a
+# bare `pip install reachy-mini-mcp` always resolves on the index. The robot stack
+# lives behind extras and is imported lazily by `serve`.
+dependencies = []
+
+[project.optional-dependencies]
+# Needed to actually run the MCP server (`reachy-mini-mcp serve`).
+server = [
+    "fastmcp>=0.1.0",
+    "httpx>=0.24.0",
+    "mcp>=0.9.0",
+    "reachy-mini>=1.0.0",
+    "python-dotenv>=1.0.0",
+]
+# Optional text-to-speech (heavy / system-dependent — needs portaudio + piper).
+tts = [
+    "piper-tts>=1.3.0",
+    "pyaudio",
+]
+# The OpenAI-compatible FastAPI server (`reachy-mini-mcp serve --openai`).
+openai = [
+    "fastapi>=0.104.0",
+    "uvicorn>=0.24.0",
+    "pydantic>=2.0.0",
+    "httpx>=0.24.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/agentculture/reachy-mini-mcp"
+Issues = "https://github.com/agentculture/reachy-mini-mcp/issues"
+
+[project.scripts]
+reachy-mini-mcp = "reachy_mini_mcp.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+# Ships every tracked file under the package, including tools_repository/*.json
+# and tools_repository/scripts/*.py (loaded as data at runtime via importlib).
+packages = ["reachy_mini_mcp"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-xdist>=3.0",
+    "pytest-cov>=4.1",
+    "black>=23.7.0",
+    "isort>=5.12.0",
+    "flake8>=6.1",
+]
+
+[tool.coverage.run]
+source = ["reachy_mini_mcp"]
+omit = [
+    "reachy_mini_mcp/__pycache__/*",
+    # Robot runtime requires a daemon + hardware; unit tests cover the manager CLI.
+    "reachy_mini_mcp/server.py",
+    "reachy_mini_mcp/server_openai.py",
+    "reachy_mini_mcp/tts_queue.py",
+    "reachy_mini_mcp/tools_repository/*",
+]
+relative_files = true
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.",
+    "if TYPE_CHECKING:",
+]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+known_first_party = ["reachy_mini_mcp"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

@@ -1,10 +1,10 @@
 {
   "mcpServers": {
     "reachy-mini": {
-      "command": "python",
-      "args": ["/path/to/reachy-mini-mcp/server.py"],
+      "command": "reachy-mini-mcp",
+      "args": ["serve"],
       "env": {
-        "PYTHONPATH": "/path/to/reachy-mini-mcp:/path/to/reachy-mini-mcp/.venv/lib/python3.12/site-packages"
+        "REACHY_BASE_URL": "http://localhost:8000"
       }
     }
   }

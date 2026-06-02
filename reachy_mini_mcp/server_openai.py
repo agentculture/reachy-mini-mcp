@@ -24,7 +24,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from tts_queue import AsyncTTSQueue
+from reachy_mini_mcp.tts_queue import AsyncTTSQueue
 import uvicorn
 
 # Load environment variables from .env file
@@ -38,7 +38,7 @@ app = FastAPI(
 )
 
 # Configuration
-REACHY_BASE_URL = "http://localhost:8000"
+REACHY_BASE_URL = os.getenv("REACHY_BASE_URL", "http://localhost:8000")
 TOOLS_REPOSITORY_PATH = Path(__file__).parent / "tools_repository"
 
 # TTS Queue (initialized in startup)
@@ -467,11 +467,16 @@ async def shutdown_event():
     print("Server shutdown complete")
 
 
-if __name__ == "__main__":
-    # Run the server
+def main() -> None:
+    """Console entry point (``reachy-mini-mcp serve --openai``): run the
+    OpenAI-compatible FastAPI server on port 8100."""
     uvicorn.run(
         app,
         host="0.0.0.0",
         port=8100,
         log_level="info"
     )
+
+
+if __name__ == "__main__":
+    main()
