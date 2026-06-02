@@ -1,0 +1,3 @@
+agents:
+- suffix: reachy-mini-mcp
+  backend: claude

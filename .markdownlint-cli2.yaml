@@ -1,0 +1,23 @@
+# markdownlint-cli2 config for reachy-mini-mcp.
+# markdownlint-cli2 stops walking at the git root, so a per-user global config
+# in the home directory isn't picked up from inside the repo.
+# Mirrors the guildmaster / steward / teken preset for workspace consistency.
+
+config:
+  default: true
+  # MD013: Line length — disabled. Prose lines wrap at the reader.
+  MD013: false
+  # MD060: Table pipe spacing — disabled (stylistic preference).
+  MD060: false
+  # MD024: Duplicate headings — allow under different parents so Keep a
+  # Changelog entries can each have ### Added / ### Changed / ### Fixed.
+  MD024:
+    siblings_only: true
+
+ignores:
+  - "node_modules/**"
+  - ".local/**"
+  - ".afi/**"
+  - ".teken/**"
+  # Vendored skills are cited verbatim from guildmaster — do not reformat them.
+  - ".claude/skills/**"

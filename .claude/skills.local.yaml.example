@@ -1,0 +1,16 @@
+# Per-machine config for reachy-mini-mcp's skills.
+# Copy this to skills.local.yaml (git-ignored) and adjust for your environment.
+# Skills read skills.local.yaml first, falling back to this example.
+
+# Path to the Culture server's agent manifest (suffix → directory mapping).
+# Used by: agent-config and any skill that resolves a registered agent
+# suffix to its repo dir.
+culture_server_yaml: ~/.culture/server.yaml
+
+# Sibling project paths checked during the cicd alignment-delta step.
+# Workspace-relative paths (../foo) are preferred. Skills skip entries
+# that don't exist on disk, so commenting out missing ones isn't required.
+sibling_projects:
+  - ../guildmaster
+  - ../steward
+  - ../culture-agent-template
