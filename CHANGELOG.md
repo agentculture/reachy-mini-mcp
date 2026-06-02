@@ -16,6 +16,10 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 - Coverage gate: pyproject.toml [tool.coverage.report] now sets fail_under = 95; CLI-manager coverage raised from 84% to ~99%.
 
+### Fixed
+
+- publish.yml `paths:` filter now also triggers on `sonar-project.properties` and the workflow file itself, so Sonar/coverage-config changes can't silently skip CI (Qodo review, PR #13).
+
 ## [0.1.0] - 2026-06-02
 
 ### Added

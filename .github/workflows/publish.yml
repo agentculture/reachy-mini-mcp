@@ -7,12 +7,16 @@ on:
       - "pyproject.toml"
       - "reachy_mini_mcp/**"
       - "tests/**"
+      - "sonar-project.properties"
+      - ".github/workflows/publish.yml"
   pull_request:
     branches: [main]
     paths:
       - "pyproject.toml"
       - "reachy_mini_mcp/**"
       - "tests/**"
+      - "sonar-project.properties"
+      - ".github/workflows/publish.yml"
 
 jobs:
   test:
