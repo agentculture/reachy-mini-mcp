@@ -47,8 +47,11 @@ fastmcp run reachy_mini_mcp/server.py
 ./start_openai_server.sh
 reachy-mini-mcp serve --openai    # or: python -m reachy_mini_mcp.server_openai
 
-# Tests (manager CLI; no robot stack required)
-uv run pytest -n auto -v
+# Tests (manager CLI only — no robot stack/daemon needed). Avoid `uv sync`/`uv run
+# pytest`: the universal resolve pulls the [server] extra → reachy-mini → pycairo,
+# which needs system cairo to build. Install just the manager + pytest instead:
+uv pip install -e . pytest pytest-xdist   # `uv venv` first if you have no venv
+uv run --no-project pytest -n auto -v
 
 # Piper TTS voice model download helper
 ./setup_piper_model.sh

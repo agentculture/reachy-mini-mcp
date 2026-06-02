@@ -26,9 +26,14 @@ jobs:
 
       - run: uv python install 3.12
 
-      - run: uv sync
+      # Install ONLY the manager (deps=[]) + pytest. Avoids `uv sync`, whose
+      # universal resolve would pull the optional [server] extra → reachy-mini →
+      # pygobject → pycairo (needs system cairo to build; not on the runner).
+      - run: uv venv
 
-      - run: uv run pytest -n auto -v
+      - run: uv pip install -e . pytest pytest-xdist
+
+      - run: uv run --no-project pytest -n auto -v
 
   test-publish:
     # Skip on fork PRs — no OIDC/environment context is available there, so
@@ -47,11 +52,11 @@ jobs:
 
       - run: uv python install 3.12
 
-      - run: uv sync
-
+      # No `uv sync` — `uv build` packages the source directly (hatchling), so we
+      # never resolve the optional [server] extra's heavy transitive deps.
       - name: Set dev version
         run: |
-          BASE=$(uv run python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          BASE=$(grep -m1 '^version = ' pyproject.toml | sed -E 's/version = "(.*)"/\1/')
           DEV_VERSION="${BASE}.dev${{ github.run_number }}"
           sed -i "s/^version = .*/version = \"${DEV_VERSION}\"/" pyproject.toml
           echo "DEV_VERSION=${DEV_VERSION}" >> "$GITHUB_ENV"
@@ -82,8 +87,7 @@ jobs:
 
       - run: uv python install 3.12
 
-      - run: uv sync
-
+      # No `uv sync` — see test-publish.
       - name: Build and publish to PyPI
         run: |
           uv build
