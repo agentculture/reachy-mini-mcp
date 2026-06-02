@@ -57,7 +57,7 @@ async def execute(make_request, create_head_pose, tts_queue, params):
 - `create_head_pose(x, y, z, roll, pitch, yaw, degrees=False, mm=False)` — builds a pose dict. When `mm=True` it converts mm→meters; when `degrees=True` it converts degrees→radians. The daemon wants **meters and radians**; antennas are passed directly in radians (e.g. `math.radians(30)`).
 - `tts_queue` — may be `None` if Piper isn't configured. Always guard: `if speech and tts_queue:`.
 
-**Gotcha:** `tools_repository/SCHEMA.md` and the README still document the old 3-argument signature `execute(make_request, create_head_pose, params)`. The real signature has **four** args (`tts_queue` was inserted third). Follow the existing scripts, not those docs. Inline-code execution was removed entirely for security (see `INLINE_REMOVAL_SUMMARY.md`); only `"type": "script"` is supported.
+The `execute()` signature takes **four** args — `tts_queue` is the third (it may be `None` if Piper isn't configured, so guard with `if speech and tts_queue:`). Inline-code execution was removed entirely for security (see `INLINE_REMOVAL_SUMMARY.md`); only `"type": "script"` is supported.
 
 To register a new tool: add the script + JSON, then add an entry to `tools_index.json` and restart the server.
 

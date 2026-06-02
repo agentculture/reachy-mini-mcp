@@ -68,7 +68,7 @@ Example (`get_robot_state.json`):
 All tools use script files for execution:
 
 - All operations are in separate Python files
-- Define an `async def execute(make_request, create_head_pose, params)` function
+- Define an `async def execute(make_request, create_head_pose, tts_queue, params)` function
 - Located in `scripts/` directory
 
 ## Adding a New Tool
@@ -81,22 +81,28 @@ All tools use script files for execution:
 """Script for my complex tool."""
 import asyncio
 
-async def execute(make_request, create_head_pose, params):
+async def execute(make_request, create_head_pose, tts_queue, params):
     """
     Perform a complex operation.
-    
+
     Args:
         make_request: Function to make HTTP requests
         create_head_pose: Function to create head pose
+        tts_queue: TTS queue for speech (may be None if Piper is not configured)
         params: Dictionary with all parameters
     """
+    # Optional speech: tts_queue may be None, so guard it
+    speech = params.get("speech")
+    if speech and tts_queue:
+        await tts_queue.enqueue_text(speech)
+
     # Step 1
     await make_request("POST", "/api/endpoint1", json_data={...})
     await asyncio.sleep(1.0)
-    
+
     # Step 2
     await make_request("POST", "/api/endpoint2", json_data={...})
-    
+
     return {"status": "success"}
 ```
 
@@ -181,6 +187,17 @@ Create head pose configurations:
 
 ```python
 pose = create_head_pose(z=10, pitch=-15, degrees=True, mm=True)
+```
+
+### `tts_queue`
+
+Optional text-to-speech queue, passed as the third argument to `execute()`. It may be
+`None` when Piper TTS is not configured, so always guard before use:
+
+```python
+speech = params.get("speech")
+if speech and tts_queue:
+    await tts_queue.enqueue_text(speech)
 ```
 
 ### Standard Libraries

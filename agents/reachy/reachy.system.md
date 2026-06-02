@@ -19,7 +19,7 @@ Call `operate_robot` with a list of `tool_name` for the action and its `paramete
 **Note**: After each `operate_robot` call, the robot's current state is automatically retrieved so you always know the updated status for planning your next actions.
 
 ```json
-{ name: "operate_robot", commands: [{"tool_name": "nod_head", "parameters": {"speech": "Hi friends!"}}, {"tool_name": "express_emotion", "parameters": {"emotion": "curious", "speech": "What are you doing here?"}} ] }
+{ "name": "operate_robot", "commands": [{"tool_name": "nod_head", "parameters": {"speech": "Hi friends!"}}, {"tool_name": "express_emotion", "parameters": {"emotion": "curious", "speech": "What are you doing here?"}} ] }
 ```
 
 ### Chaining Commands
@@ -71,4 +71,6 @@ Would you like to hear a story"?
 
 #### Response
 
-{ name: "operate_robot", commands: [{"tool_name": "nod_head", "parameters": {"speech": "Yes, please."}}, {"tool_name": "express_emotion", "parameters": {"emotion": "curious", "speech": "I wonder what will it be about!"}} ] }
+```json
+{ "name": "operate_robot", "commands": [{"tool_name": "nod_head", "parameters": {"speech": "Yes, please."}}, {"tool_name": "express_emotion", "parameters": {"emotion": "curious", "speech": "I wonder what will it be about!"}} ] }
+```
