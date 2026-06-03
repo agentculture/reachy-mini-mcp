@@ -1,6 +1,6 @@
 [project]
 name = "reachy-mini-mcp"
-version = "0.2.1"
+version = "0.2.2"
 description = "MCP server + manager CLI for the Reachy Mini robot."
 readme = "README.md"
 license = "MIT"
@@ -75,6 +75,7 @@ source = ["reachy_mini_mcp"]
 omit = [
     "reachy_mini_mcp/__pycache__/*",
     # Robot runtime requires a daemon + hardware; unit tests cover the manager CLI.
+    "reachy_mini_mcp/_runtime.py",
     "reachy_mini_mcp/server.py",
     "reachy_mini_mcp/server_openai.py",
     "reachy_mini_mcp/tts_queue.py",

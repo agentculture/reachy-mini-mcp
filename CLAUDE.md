@@ -89,7 +89,7 @@ async def execute(make_request, create_head_pose, tts_queue, params):
 - `create_head_pose(x, y, z, roll, pitch, yaw, degrees=False, mm=False)` — builds a pose dict. When `mm=True` it converts mm→meters; when `degrees=True` it converts degrees→radians. The daemon wants **meters and radians**; antennas are passed directly in radians (e.g. `math.radians(30)`).
 - `tts_queue` — may be `None` if Piper isn't configured. Always guard: `if speech and tts_queue:`.
 
-The `execute()` signature takes **four** args — `tts_queue` is the third (it may be `None` if Piper isn't configured, so guard with `if speech and tts_queue:`). Inline-code execution was removed entirely for security (see `INLINE_REMOVAL_SUMMARY.md`); only `"type": "script"` is supported.
+The `execute()` signature takes **four** args — `tts_queue` is the third (it may be `None` if Piper isn't configured, so guard with `if speech and tts_queue:`). The loader injects all four **positionally**, so parameter *names* are not part of the runtime contract: a script that doesn't use one of them may prefix that parameter with `_` (e.g. `async def execute(make_request, _create_head_pose, _tts_queue, _params):` in the read-only `get_*` tools) to mark it intentionally unused — this is what keeps SonarCloud's S1172 quiet without a config suppression. Inline-code execution was removed entirely for security (see `INLINE_REMOVAL_SUMMARY.md`); only `"type": "script"` is supported.
 
 To register a new tool: add the script + JSON, then add an entry to `tools_index.json` and restart the server.
 
@@ -103,16 +103,26 @@ This meta-tool has two modes and some implicit behavior worth knowing:
 
 ## Two servers, one set of machinery — keep them in sync
 
-`reachy_mini_mcp/server.py` and `reachy_mini_mcp/server_openai.py` each contain their own copy of `create_head_pose`, `make_request`, and the tool-loading functions. A fix to loading/dispatch logic generally needs to be applied to **both**. Both now also expose a `main()` entry point (called by `reachy-mini-mcp serve` / `serve --openai`). Known divergences to be aware of:
+`reachy_mini_mcp/server.py` and `reachy_mini_mcp/server_openai.py` share one set of
+helpers. As of 0.2.2 the byte-identical pieces — `create_head_pose`, `make_request`,
+and the tool-repository loaders (`load_tool_index` / `load_tool_definition` /
+`load_script_module`), plus the `REACHY_BASE_URL` / `TOOLS_REPOSITORY_PATH`
+constants — live **once** in `reachy_mini_mcp/_runtime.py` and are imported by both
+servers (this removed the SonarCloud duplication block). What still differs per
+server is the *tool-wrapping/registration* logic (`create_tool_function`,
+`register_tools_from_repository`), so a fix there generally needs to be applied to
+**both**. Both also expose a `main()` entry point (called by `reachy-mini-mcp serve`
+/ `serve --openai`). Known divergences to be aware of:
 
-- Both read `REACHY_BASE_URL` from the environment (defaulting to `http://localhost:8000`). (Historically `server_openai.py` hardcoded it; fixed in 0.1.0.)
+- Both read `REACHY_BASE_URL` from the environment (defaulting to `http://localhost:8000`) via `_runtime.py`. (Historically `server_openai.py` hardcoded it; fixed in 0.1.0.)
+- The OpenAI server's bind address comes from `REACHY_OPENAI_HOST` (default `127.0.0.1`); set it to `0.0.0.0` for Docker/cross-host reach. (Was hardcoded to `0.0.0.0`; fixed in 0.2.2.)
 - `server.py` builds an `inspect.Signature` with type annotations for each tool (FastMCP introspects it); `server_openai.py` doesn't need that and builds an OpenAI JSON schema instead.
 - `server.py` is a **stdio** server, so its startup banner / tool-loading prints are routed to **stderr** (stdout is the JSON-RPC channel); `server_openai.py` is HTTP, so it prints freely.
 - `server_openai.py`'s `/v1/chat/completions` is a **stub** — naive keyword matching ("turn on" → `turn_on_robot`), not a real LLM. Real LLM reasoning is expected to come from an upstream model (e.g. the vLLM containers) that then calls `/execute_tool`.
 
 ## Configuration
 
-Copy `.env.example` (MCP/TTS) or `.env.openai.example` (HTTP/LLM) to `.env`. `.env` is gitignored. Key vars: `REACHY_BASE_URL`, `PIPER_MODEL` (path **without** `.onnx`), `AUDIO_DEVICE` (ALSA device, find via `aplay -L`), and `HF_TOKEN` for the Docker stack.
+Copy `.env.example` (MCP/TTS) or `.env.openai.example` (HTTP/LLM) to `.env`. `.env` is gitignored. Key vars: `REACHY_BASE_URL`, `REACHY_OPENAI_HOST` (bind address for the `--openai` server; default `127.0.0.1`, set `0.0.0.0` for Docker), `PIPER_MODEL` (path **without** `.onnx`), `AUDIO_DEVICE` (ALSA device, find via `aplay -L`), and `HF_TOKEN` for the Docker stack.
 
 TTS (`reachy_mini_mcp/tts_queue.py`) shells out to the `piper` executable and plays WAVs with `aplay` on a background thread. If `piper`/`aplay` or a model is missing, TTS init fails gracefully and `speech` params are silently ignored.
 

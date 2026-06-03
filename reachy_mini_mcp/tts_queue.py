@@ -125,10 +125,10 @@ class TTSQueue:
             if result.returncode == 0:
                 _log(f"✓ piper found: {result.stdout.strip()}")
             else:
-                _log(f"⚠️  piper executable found but returned error")
+                _log("⚠️  piper executable found but returned error")
         except FileNotFoundError:
             _log(f"⚠️  piper not found at '{self.piper_executable}'")
-            _log(f"   Please install from: https://github.com/OHF-Voice/piper-gpl")
+            _log("   Please install from: https://github.com/OHF-Voice/piper-gpl")
         except Exception as e:
             _log(f"⚠️  Error checking piper: {e}")
     
@@ -195,14 +195,14 @@ class TTSQueue:
             )
             
             # Wait for playback to complete
-            stdout, stderr = self.current_process.communicate()
+            _, stderr = self.current_process.communicate()
             
             if self.current_process.returncode != 0:
                 _log(f"⚠️  aplay returned error code: {self.current_process.returncode}")
                 if stderr:
                     _log(f"   stderr: {stderr.decode('utf-8', errors='ignore')}")
             else:
-                _log(f"   ✓ Playback completed")
+                _log("   ✓ Playback completed")
             
             self.current_process = None
             

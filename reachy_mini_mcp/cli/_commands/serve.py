@@ -30,7 +30,6 @@ def register(sub: argparse._SubParsersAction) -> None:
 
 
 def _handle(args: argparse.Namespace) -> int:
-    module = "server_openai" if args.openai else "server"
     try:
         if args.openai:
             from reachy_mini_mcp.server_openai import main as serve_main

@@ -33,7 +33,7 @@ def register(sub: argparse._SubParsersAction) -> None:
     parser.set_defaults(func=_handle)
 
 
-def _handle(args: argparse.Namespace) -> int:
+def _handle(args: argparse.Namespace) -> None:
     target = _clients.resolve_target(client=args.client, scope=args.scope, path=args.path)
     config = _clients.load_config(target.path)
     removed = _clients.remove_entry(config, name=args.name)
@@ -41,12 +41,11 @@ def _handle(args: argparse.Namespace) -> int:
     if args.dry_run:
         emit_diagnostic(f"# would write {target.label}")
         emit_result(json.dumps(config, indent=2))
-        return 0
+        return
 
     if not removed:
         emit_diagnostic(f"{args.name!r} not found in {target.label} — nothing to do.")
-        return 0
+        return
 
     _clients.write_config(target.path, config)
     emit_diagnostic(f"Removed {args.name!r} from {target.label}")
-    return 0

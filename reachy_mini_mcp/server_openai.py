@@ -12,18 +12,22 @@ The server communicates with the Reachy Mini daemon running on localhost:8000.
 This version uses a repository-based approach for defining tools dynamically.
 """
 
-import httpx
 import json
 import os
-import math
 import asyncio
-import importlib.util
-from pathlib import Path
 from typing import Optional, Dict, Any, List
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from reachy_mini_mcp._runtime import (
+    REACHY_BASE_URL,
+    TOOLS_REPOSITORY_PATH,
+    create_head_pose,
+    make_request,
+    load_tool_index,
+    load_tool_definition,
+    load_script_module,
+)
 from reachy_mini_mcp.tts_queue import AsyncTTSQueue
 import uvicorn
 
@@ -36,10 +40,6 @@ app = FastAPI(
     description="OpenAI-compatible API for controlling Reachy Mini robot",
     version="1.0.0"
 )
-
-# Configuration
-REACHY_BASE_URL = os.getenv("REACHY_BASE_URL", "http://localhost:8000")
-TOOLS_REPOSITORY_PATH = Path(__file__).parent / "tools_repository"
 
 # TTS Queue (initialized in startup)
 tts_queue = None
@@ -73,100 +73,6 @@ class ChatCompletionRequest(BaseModel):
     tool_choice: Optional[str] = Field("auto", description="Tool choice strategy")
     temperature: Optional[float] = Field(0.7, description="Sampling temperature")
     max_tokens: Optional[int] = Field(3000, description="Maximum tokens to generate")
-
-
-# Helper functions
-
-def create_head_pose(
-    x: float = 0.0,
-    y: float = 0.0, 
-    z: float = 0.0,
-    roll: float = 0.0,
-    pitch: float = 0.0,
-    yaw: float = 0.0,
-    degrees: bool = False,
-    mm: bool = False
-) -> Dict[str, Any]:
-    """Create a head pose configuration for Reachy Mini."""
-    if mm:
-        x, y, z = x / 1000, y / 1000, z / 1000
-    
-    if degrees:
-        roll = math.radians(roll)
-        pitch = math.radians(pitch)
-        yaw = math.radians(yaw)
-    
-    return {
-        "x": x,
-        "y": y,
-        "z": z,
-        "roll": roll,
-        "pitch": pitch,
-        "yaw": yaw
-    }
-
-
-async def make_request(
-    method: str,
-    endpoint: str,
-    json_data: Optional[Dict] = None,
-    params: Optional[Dict] = None
-) -> Dict[str, Any]:
-    """Make an HTTP request to the Reachy Mini daemon."""
-    url = f"{REACHY_BASE_URL}{endpoint}"
-    
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        try:
-            if method.upper() == "GET":
-                response = await client.get(url, params=params)
-            elif method.upper() == "POST":
-                response = await client.post(url, json=json_data)
-            elif method.upper() == "PUT":
-                response = await client.put(url, json=json_data)
-            elif method.upper() == "DELETE":
-                response = await client.delete(url)
-            else:
-                raise ValueError(f"Unsupported HTTP method: {method}")
-            
-            response.raise_for_status()
-            return response.json() if response.content else {"status": "success"}
-            
-        except httpx.HTTPError as e:
-            return {"error": str(e), "status": "failed"}
-
-
-# Dynamic tool loading functions
-
-def load_tool_index() -> Dict[str, Any]:
-    """Load the tool index from tools_index.json."""
-    index_path = TOOLS_REPOSITORY_PATH / "tools_index.json"
-    if not index_path.exists():
-        raise FileNotFoundError(f"Tool index not found at {index_path}")
-    
-    with open(index_path, 'r') as f:
-        return json.load(f)
-
-
-def load_tool_definition(definition_file: str) -> Dict[str, Any]:
-    """Load a tool definition from a JSON file."""
-    def_path = TOOLS_REPOSITORY_PATH / definition_file
-    if not def_path.exists():
-        raise FileNotFoundError(f"Tool definition not found at {def_path}")
-    
-    with open(def_path, 'r') as f:
-        return json.load(f)
-
-
-def load_script_module(script_file: str):
-    """Dynamically load a Python script as a module."""
-    script_path = TOOLS_REPOSITORY_PATH / "scripts" / script_file
-    if not script_path.exists():
-        raise FileNotFoundError(f"Script not found at {script_path}")
-    
-    spec = importlib.util.spec_from_file_location("tool_script", script_path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 def convert_tool_to_openai_format(tool_def: Dict[str, Any]) -> Dict[str, Any]:
@@ -302,7 +208,13 @@ async def get_tools():
     return {"tools": tools}
 
 
-@app.post("/execute_tool")
+@app.post(
+    "/execute_tool",
+    responses={
+        404: {"description": "Tool not found in the registry"},
+        500: {"description": "Tool raised an error during execution"},
+    },
+)
 async def execute_tool(request: ToolExecutionRequest):
     """Execute a tool with given arguments."""
     tool_name = request.tool_name
@@ -325,7 +237,10 @@ async def execute_tool(request: ToolExecutionRequest):
         )
 
 
-@app.post("/v1/chat/completions")
+@app.post(
+    "/v1/chat/completions",
+    responses={400: {"description": "No user message found in the request"}},
+)
 async def chat_completions(request: ChatCompletionRequest):
     """
     OpenAI-compatible chat completions endpoint.
@@ -469,10 +384,17 @@ async def shutdown_event():
 
 def main() -> None:
     """Console entry point (``reachy-mini-mcp serve --openai``): run the
-    OpenAI-compatible FastAPI server on port 8100."""
+    OpenAI-compatible FastAPI server on port 8100.
+
+    The bind address defaults to loopback (``127.0.0.1``) so the server is not
+    exposed on every interface by default. Containerized / cross-host
+    deployments that need it reachable from other machines set
+    ``REACHY_OPENAI_HOST=0.0.0.0`` explicitly.
+    """
+    host = os.getenv("REACHY_OPENAI_HOST", "127.0.0.1")
     uvicorn.run(
         app,
-        host="0.0.0.0",
+        host=host,
         port=8100,
         log_level="info"
     )

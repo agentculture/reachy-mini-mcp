@@ -1,6 +1,8 @@
 """Script for shaking the robot's head."""
 import asyncio
 
+GOTO_ENDPOINT = "/api/move/goto"
+
 
 async def execute(make_request, create_head_pose, tts_queue, params):
     """
@@ -22,16 +24,16 @@ async def execute(make_request, create_head_pose, tts_queue, params):
     
     # Shake left
     pose_left = create_head_pose(yaw=-angle, degrees=True)
-    await make_request("POST", "/api/move/goto", json_data={"head_pose": pose_left, "duration": duration})
+    await make_request("POST", GOTO_ENDPOINT, json_data={"head_pose": pose_left, "duration": duration})
     await asyncio.sleep(duration)
     
     # Shake right
     pose_right = create_head_pose(yaw=angle, degrees=True)
-    await make_request("POST", "/api/move/goto", json_data={"head_pose": pose_right, "duration": duration})
+    await make_request("POST", GOTO_ENDPOINT, json_data={"head_pose": pose_right, "duration": duration})
     await asyncio.sleep(duration)
     
     # Return to neutral
     pose_neutral = create_head_pose()
-    return await make_request("POST", "/api/move/goto", json_data={"head_pose": pose_neutral, "duration": duration})
+    return await make_request("POST", GOTO_ENDPOINT, json_data={"head_pose": pose_neutral, "duration": duration})
 
 

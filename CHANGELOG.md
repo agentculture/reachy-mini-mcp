@@ -4,6 +4,18 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.2] - 2026-06-03
+
+### Changed
+
+- Deduplicated the two server frontends: the shared daemon HTTP client (`make_request`), pose builder (`create_head_pose`), and tool-repository loaders now live once in `reachy_mini_mcp/_runtime.py` and are imported by both `server.py` and `server_openai.py` (removes the 79-line copy-paste block flagged by SonarCloud duplication).
+- OpenAI-compatible server now binds to `127.0.0.1` by default instead of `0.0.0.0`; set `REACHY_OPENAI_HOST=0.0.0.0` for Docker/cross-host deployments (resolves the BLOCKER bind-all-interfaces vulnerability, S8392).
+- Refactored `operate_robot` into focused helpers (`_run_command_sequence`, `_run_single_command`, `_execute_one_command`, `_append_state_result`, `_sequence_status`), cutting its cognitive complexity from 40 to within the allowed limit while preserving identical output.
+
+### Fixed
+
+- Cleared the remaining SonarCloud maintainability smells: duplicated string literals (now module constants), handlers that always returned the same value, unused locals/parameters, a redundant exception class, placeholder-less f-strings, and undocumented FastAPI HTTPException responses.
+
 ## [0.2.1] - 2026-06-03
 
 ### Fixed

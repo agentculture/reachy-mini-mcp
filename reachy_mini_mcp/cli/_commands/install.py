@@ -75,7 +75,7 @@ def _add_target_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _handle(args: argparse.Namespace) -> int:
+def _handle(args: argparse.Namespace) -> None:
     target = _clients.resolve_target(client=args.client, scope=args.scope, path=args.path)
     entry = _mcp.build_entry(base_url=args.base_url, dev=args.dev)
     config = _clients.load_config(target.path)
@@ -84,12 +84,11 @@ def _handle(args: argparse.Namespace) -> int:
     if args.dry_run:
         emit_diagnostic(f"# would write {target.label}")
         emit_result(json.dumps(config, indent=2))
-        return 0
+        return
 
     if not changed:
         emit_diagnostic(f"{args.name!r} already registered in {target.label} — no change.")
-        return 0
+        return
 
     _clients.write_config(target.path, config)
     emit_diagnostic(f"Installed {args.name!r} → {target.label}")
-    return 0

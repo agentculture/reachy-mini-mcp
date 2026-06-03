@@ -50,6 +50,6 @@ def daemon_status(base_url: str, *, timeout: float = 2.0) -> Tuple[bool, str]:
             return True, f"HTTP {resp.status}"
     except urllib.error.HTTPError as exc:
         return True, f"HTTP {exc.code}"
-    except (urllib.error.URLError, OSError, ValueError) as exc:
+    except (OSError, ValueError) as exc:  # urllib.error.URLError is an OSError subclass
         reason = getattr(exc, "reason", exc)
         return False, str(reason)
