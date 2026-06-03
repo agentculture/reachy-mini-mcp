@@ -89,7 +89,7 @@ async def execute(make_request, create_head_pose, tts_queue, params):
 - `create_head_pose(x, y, z, roll, pitch, yaw, degrees=False, mm=False)` — builds a pose dict. When `mm=True` it converts mm→meters; when `degrees=True` it converts degrees→radians. The daemon wants **meters and radians**; antennas are passed directly in radians (e.g. `math.radians(30)`).
 - `tts_queue` — may be `None` if Piper isn't configured. Always guard: `if speech and tts_queue:`.
 
-The `execute()` signature takes **four** args — `tts_queue` is the third (it may be `None` if Piper isn't configured, so guard with `if speech and tts_queue:`). Inline-code execution was removed entirely for security (see `INLINE_REMOVAL_SUMMARY.md`); only `"type": "script"` is supported.
+The `execute()` signature takes **four** args — `tts_queue` is the third (it may be `None` if Piper isn't configured, so guard with `if speech and tts_queue:`). The loader injects all four **positionally**, so parameter *names* are not part of the runtime contract: a script that doesn't use one of them may prefix that parameter with `_` (e.g. `async def execute(make_request, _create_head_pose, _tts_queue, _params):` in the read-only `get_*` tools) to mark it intentionally unused — this is what keeps SonarCloud's S1172 quiet without a config suppression. Inline-code execution was removed entirely for security (see `INLINE_REMOVAL_SUMMARY.md`); only `"type": "script"` is supported.
 
 To register a new tool: add the script + JSON, then add an entry to `tools_index.json` and restart the server.
 

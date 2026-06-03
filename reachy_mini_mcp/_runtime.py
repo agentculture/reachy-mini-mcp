@@ -18,6 +18,12 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import httpx
+from dotenv import load_dotenv
+
+# Load .env here, before REACHY_BASE_URL is captured below. Both servers also
+# call load_dotenv(), but they import this module first — so the capture would
+# otherwise run before their load_dotenv() and ignore a .env-defined base URL.
+load_dotenv()
 
 # Configuration shared by both servers.
 REACHY_BASE_URL = os.getenv("REACHY_BASE_URL", "http://localhost:8000")
