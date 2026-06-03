@@ -4,7 +4,7 @@ Turns off the robot's motors and deactivates systems.
 """
 
 
-async def execute(make_request, create_head_pose, tts_queue, params):
+async def execute(make_request, _create_head_pose, tts_queue, params):
     """Execute the turn_off_robot tool."""
     speech = params.get('speech')
     

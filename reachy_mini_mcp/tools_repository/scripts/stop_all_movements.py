@@ -4,7 +4,7 @@ Emergency stop - immediately halts all robot movements.
 """
 
 
-async def execute(make_request, create_head_pose, tts_queue, params):
+async def execute(make_request, _create_head_pose, tts_queue, params):
     """Execute the stop_all_movements tool."""
     speech = params.get('speech')
     

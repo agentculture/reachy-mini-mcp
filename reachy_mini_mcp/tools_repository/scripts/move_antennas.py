@@ -5,7 +5,7 @@ Moves the robot's antennas independently.
 import math
 
 
-async def execute(make_request, create_head_pose, tts_queue, params):
+async def execute(make_request, _create_head_pose, tts_queue, params):
     """Execute the move_antennas tool."""
     left = params.get('left')
     right = params.get('right')

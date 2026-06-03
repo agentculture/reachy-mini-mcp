@@ -28,6 +28,8 @@ from reachy_mini_mcp.cli._errors import EXIT_USER_ERROR, ReachyError
 CLIENTS = ("claude-code", "claude-desktop", "cursor")
 SCOPES = ("user", "project")
 
+_DESKTOP_CONFIG_FILENAME = "claude_desktop_config.json"
+
 
 @dataclass
 class ClientTarget:
@@ -42,12 +44,12 @@ class ClientTarget:
 def _claude_desktop_path() -> Path:
     home = Path.home()
     if sys.platform == "darwin":
-        return home / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
+        return home / "Library" / "Application Support" / "Claude" / _DESKTOP_CONFIG_FILENAME
     if sys.platform.startswith("win"):
         base = os.environ.get("APPDATA")
         root = Path(base) if base else home / "AppData" / "Roaming"
-        return root / "Claude" / "claude_desktop_config.json"
-    return home / ".config" / "Claude" / "claude_desktop_config.json"
+        return root / "Claude" / _DESKTOP_CONFIG_FILENAME
+    return home / ".config" / "Claude" / _DESKTOP_CONFIG_FILENAME
 
 
 def resolve_target(

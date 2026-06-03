@@ -11,16 +11,20 @@ This version uses a repository-based approach for defining tools dynamically.
 
 import sys
 import contextlib
-import httpx
 import json
 import os
-import math
-import asyncio
-import importlib.util
-from pathlib import Path
 from typing import Optional, Dict, Any, List
 from dotenv import load_dotenv
 from fastmcp import FastMCP
+from reachy_mini_mcp._runtime import (
+    REACHY_BASE_URL,
+    TOOLS_REPOSITORY_PATH,
+    create_head_pose,
+    make_request,
+    load_tool_index,
+    load_tool_definition,
+    load_script_module,
+)
 from reachy_mini_mcp.tts_queue import AsyncTTSQueue
 
 # Load environment variables from .env file
@@ -29,116 +33,8 @@ load_dotenv()
 # Initialize FastMCP server
 mcp = FastMCP("Reachy Mini Controller")
 
-# Configuration
-REACHY_BASE_URL = os.getenv("REACHY_BASE_URL", "http://localhost:8000")
-TOOLS_REPOSITORY_PATH = Path(__file__).parent / "tools_repository"
-
 # TTS Queue (initialized in initialize_server)
 tts_queue = None
-
-
-# Helper functions
-def create_head_pose(
-    x: float = 0.0,
-    y: float = 0.0, 
-    z: float = 0.0,
-    roll: float = 0.0,
-    pitch: float = 0.0,
-    yaw: float = 0.0,
-    degrees: bool = False,
-    mm: bool = False
-) -> Dict[str, Any]:
-    """
-    Create a head pose configuration for Reachy Mini.
-    
-    Args:
-        x, y, z: Position offsets (meters by default, mm if mm=True)
-        roll, pitch, yaw: Rotation angles (radians by default, degrees if degrees=True)
-        degrees: If True, angles are in degrees
-        mm: If True, positions are in millimeters
-    
-    Returns:
-        Dictionary with head pose configuration
-    """
-    if mm:
-        x, y, z = x / 1000, y / 1000, z / 1000
-    
-    if degrees:
-        roll = math.radians(roll)
-        pitch = math.radians(pitch)
-        yaw = math.radians(yaw)
-    
-    return {
-        "x": x,
-        "y": y,
-        "z": z,
-        "roll": roll,
-        "pitch": pitch,
-        "yaw": yaw
-    }
-
-
-async def make_request(
-    method: str,
-    endpoint: str,
-    json_data: Optional[Dict] = None,
-    params: Optional[Dict] = None
-) -> Dict[str, Any]:
-    """Make an HTTP request to the Reachy Mini daemon."""
-    url = f"{REACHY_BASE_URL}{endpoint}"
-    
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        try:
-            if method.upper() == "GET":
-                response = await client.get(url, params=params)
-            elif method.upper() == "POST":
-                response = await client.post(url, json=json_data)
-            elif method.upper() == "PUT":
-                response = await client.put(url, json=json_data)
-            elif method.upper() == "DELETE":
-                response = await client.delete(url)
-            else:
-                raise ValueError(f"Unsupported HTTP method: {method}")
-            
-            response.raise_for_status()
-            return response.json() if response.content else {"status": "success"}
-            
-        except httpx.HTTPError as e:
-            return {"error": str(e), "status": "failed"}
-
-
-# Dynamic tool loading functions
-
-def load_tool_index() -> Dict[str, Any]:
-    """Load the tool index from tools_index.json."""
-    index_path = TOOLS_REPOSITORY_PATH / "tools_index.json"
-    if not index_path.exists():
-        raise FileNotFoundError(f"Tool index not found at {index_path}")
-    
-    with open(index_path, 'r') as f:
-        return json.load(f)
-
-
-def load_tool_definition(definition_file: str) -> Dict[str, Any]:
-    """Load a tool definition from a JSON file."""
-    def_path = TOOLS_REPOSITORY_PATH / definition_file
-    if not def_path.exists():
-        raise FileNotFoundError(f"Tool definition not found at {def_path}")
-    
-    with open(def_path, 'r') as f:
-        return json.load(f)
-
-
-def load_script_module(script_file: str):
-    """Dynamically load a Python script as a module."""
-    script_path = TOOLS_REPOSITORY_PATH / "scripts" / script_file
-    if not script_path.exists():
-        raise FileNotFoundError(f"Script not found at {script_path}")
-    
-    spec = importlib.util.spec_from_file_location("tool_script", script_path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 def create_tool_function(tool_def: Dict[str, Any]):
@@ -366,6 +262,160 @@ def get_tool_registry() -> Dict[str, Any]:
     return TOOL_REGISTRY
 
 
+def _sequence_status(failed_count: int, total: int) -> str:
+    """Summary status for a command sequence (no failures / some / all failed)."""
+    if failed_count == 0:
+        return "success"
+    if failed_count < total:
+        return "partial"
+    return "failed"
+
+
+async def _execute_one_command(registry, idx, command):
+    """Run a single command from a sequence. Returns ``(result_dict, failed)``."""
+    if not isinstance(command, dict):
+        return {
+            "command_index": idx,
+            "error": "Each command must be a dictionary",
+            "status": "failed"
+        }, True
+
+    cmd_tool_name = command.get("tool_name")
+    cmd_parameters = command.get("parameters", {})
+
+    if not cmd_tool_name:
+        return {
+            "command_index": idx,
+            "error": "Missing 'tool_name' in command",
+            "status": "failed"
+        }, True
+
+    if cmd_tool_name not in registry:
+        available_tools = ", ".join(sorted(registry.keys()))
+        return {
+            "command_index": idx,
+            "tool_name": cmd_tool_name,
+            "error": f"Tool '{cmd_tool_name}' not found",
+            "available_tools": available_tools,
+            "status": "failed"
+        }, True
+
+    try:
+        tool_func = registry[cmd_tool_name]
+        result = await tool_func(**cmd_parameters)
+        return {
+            "command_index": idx,
+            "tool": cmd_tool_name,
+            "parameters": cmd_parameters,
+            "result": result,
+            "status": "success"
+        }, False
+    except Exception as e:
+        return {
+            "command_index": idx,
+            "tool": cmd_tool_name,
+            "parameters": cmd_parameters,
+            "error": str(e),
+            "status": "failed"
+        }, True
+
+
+async def _append_state_result(registry, results, command_index):
+    """Auto-append a ``get_robot_state`` result at the end of a sequence."""
+    try:
+        if "get_robot_state" in registry:
+            tool_func = registry["get_robot_state"]
+            state_result = await tool_func()
+            results.append({
+                "command_index": command_index,
+                "tool": "get_robot_state",
+                "parameters": {},
+                "result": state_result,
+                "status": "success",
+                "auto_appended": True
+            })
+    except Exception as e:
+        results.append({
+            "command_index": command_index,
+            "tool": "get_robot_state",
+            "parameters": {},
+            "error": str(e),
+            "status": "failed",
+            "auto_appended": True
+        })
+
+
+async def _run_command_sequence(registry, commands):
+    """Sequence mode: run each command, then auto-append the robot state."""
+    if not isinstance(commands, list):
+        return {
+            "error": "commands parameter must be a list of command dictionaries",
+            "status": "failed"
+        }
+
+    results = []
+    failed_count = 0
+    for idx, command in enumerate(commands):
+        result, failed = await _execute_one_command(registry, idx, command)
+        results.append(result)
+        if failed:
+            failed_count += 1
+
+    await _append_state_result(registry, results, len(commands))
+
+    return {
+        "mode": "sequence",
+        "total_commands": len(commands),
+        "successful": len(commands) - failed_count,
+        "failed": failed_count,
+        "results": results,
+        "status": _sequence_status(failed_count, len(commands))
+    }
+
+
+async def _run_single_command(registry, tool_name, parameters):
+    """Single command mode (backward compatible): run it, then attach robot state."""
+    if parameters is None:
+        parameters = {}
+
+    if tool_name not in registry:
+        available_tools = ", ".join(sorted(registry.keys()))
+        return {
+            "error": f"Tool '{tool_name}' not found",
+            "available_tools": available_tools,
+            "registry_size": len(registry),
+            "status": "failed"
+        }
+
+    try:
+        tool_func = registry[tool_name]
+        result = await tool_func(**parameters)
+
+        # Automatically get robot state after execution (unless already getting state)
+        robot_state = None
+        if tool_name != "get_robot_state" and "get_robot_state" in registry:
+            try:
+                state_func = registry["get_robot_state"]
+                robot_state = await state_func()
+            except Exception as state_error:
+                robot_state = {"error": str(state_error)}
+
+        return {
+            "tool": tool_name,
+            "parameters": parameters,
+            "result": result,
+            "robot_state": robot_state,
+            "status": "success"
+        }
+    except Exception as e:
+        return {
+            "tool": tool_name,
+            "parameters": parameters,
+            "error": str(e),
+            "status": "failed"
+        }
+
+
 # Meta-tool for operating the robot dynamically
 # Note: This is registered manually in initialize_server() after all tools are loaded
 async def operate_robot(
@@ -432,158 +482,18 @@ async def operate_robot(
             {"tool_name": "look_at_direction", "parameters": {"direction": "left", "duration": 1.0}}
         ])
     """
-    # Get the current tool registry
+    # Thin dispatcher — the per-mode logic lives in the helpers above so this
+    # meta-tool stays simple (and FastMCP only introspects this signature/docstring).
     registry = get_tool_registry()
-    
-    # Determine mode: sequence or single command
+
     if commands is not None:
-        # Sequence mode
-        if not isinstance(commands, list):
-            return {
-                "error": "commands parameter must be a list of command dictionaries",
-                "status": "failed"
-            }
-        
-        results = []
-        failed_count = 0
-        
-        for idx, command in enumerate(commands):
-            if not isinstance(command, dict):
-                results.append({
-                    "command_index": idx,
-                    "error": "Each command must be a dictionary",
-                    "status": "failed"
-                })
-                failed_count += 1
-                continue
-            
-            cmd_tool_name = command.get("tool_name")
-            cmd_parameters = command.get("parameters", {})
-            
-            if not cmd_tool_name:
-                results.append({
-                    "command_index": idx,
-                    "error": "Missing 'tool_name' in command",
-                    "status": "failed"
-                })
-                failed_count += 1
-                continue
-            
-            # Check if tool exists
-            if cmd_tool_name not in registry:
-                available_tools = ", ".join(sorted(registry.keys()))
-                results.append({
-                    "command_index": idx,
-                    "tool_name": cmd_tool_name,
-                    "error": f"Tool '{cmd_tool_name}' not found",
-                    "available_tools": available_tools,
-                    "status": "failed"
-                })
-                failed_count += 1
-                continue
-            
-            # Execute the command
-            try:
-                tool_func = registry[cmd_tool_name]
-                result = await tool_func(**cmd_parameters)
-                results.append({
-                    "command_index": idx,
-                    "tool": cmd_tool_name,
-                    "parameters": cmd_parameters,
-                    "result": result,
-                    "status": "success"
-                })
-            except Exception as e:
-                results.append({
-                    "command_index": idx,
-                    "tool": cmd_tool_name,
-                    "parameters": cmd_parameters,
-                    "error": str(e),
-                    "status": "failed"
-                })
-                failed_count += 1
-        
-        # Automatically append get_robot_state at the end
-        try:
-            if "get_robot_state" in registry:
-                tool_func = registry["get_robot_state"]
-                state_result = await tool_func()
-                results.append({
-                    "command_index": len(commands),
-                    "tool": "get_robot_state",
-                    "parameters": {},
-                    "result": state_result,
-                    "status": "success",
-                    "auto_appended": True
-                })
-        except Exception as e:
-            results.append({
-                "command_index": len(commands),
-                "tool": "get_robot_state",
-                "parameters": {},
-                "error": str(e),
-                "status": "failed",
-                "auto_appended": True
-            })
-        
-        return {
-            "mode": "sequence",
-            "total_commands": len(commands),
-            "successful": len(commands) - failed_count,
-            "failed": failed_count,
-            "results": results,
-            "status": "success" if failed_count == 0 else "partial" if failed_count < len(commands) else "failed"
-        }
-    
-    elif tool_name is not None:
-        # Single command mode (backward compatible)
-        if parameters is None:
-            parameters = {}
-        
-        # Check if tool exists in registry
-        if tool_name not in registry:
-            available_tools = ", ".join(sorted(registry.keys()))
-            return {
-                "error": f"Tool '{tool_name}' not found",
-                "available_tools": available_tools,
-                "registry_size": len(registry),
-                "status": "failed"
-            }
-        
-        try:
-            # Execute the tool
-            tool_func = registry[tool_name]
-            result = await tool_func(**parameters)
-            
-            # Automatically get robot state after execution (unless already getting state)
-            robot_state = None
-            if tool_name != "get_robot_state" and "get_robot_state" in registry:
-                try:
-                    state_func = registry["get_robot_state"]
-                    robot_state = await state_func()
-                except Exception as state_error:
-                    robot_state = {"error": str(state_error)}
-            
-            return {
-                "tool": tool_name,
-                "parameters": parameters,
-                "result": result,
-                "robot_state": robot_state,
-                "status": "success"
-            }
-        except Exception as e:
-            return {
-                "tool": tool_name,
-                "parameters": parameters,
-                "error": str(e),
-                "status": "failed"
-            }
-    
-    else:
-        return {
-            "error": "Must provide either 'tool_name' for single command or 'commands' for sequence",
-            "status": "failed"
-        }
+        return await _run_command_sequence(registry, commands)
+    if tool_name is not None:
+        return await _run_single_command(registry, tool_name, parameters)
+    return {
+        "error": "Must provide either 'tool_name' for single command or 'commands' for sequence",
+        "status": "failed"
+    }
 
 
 # Initialize and run
@@ -627,7 +537,7 @@ def initialize_server():
     # All other tools are loaded into the registry but not exposed as individual MCP tools
     mcp.tool()(operate_robot)
     print("✓ Registered MCP tool: operate_robot (meta-tool for all robot operations)")
-    print(f"✓ Individual tools are available via operate_robot but not as separate MCP tools")
+    print("✓ Individual tools are available via operate_robot but not as separate MCP tools")
     
     print("=" * 60)
     print("Server initialized and ready!")

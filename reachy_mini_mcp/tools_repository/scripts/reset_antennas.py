@@ -4,7 +4,7 @@ Resets both antennas to their neutral position (0 degrees).
 """
 
 
-async def execute(make_request, create_head_pose, tts_queue, params):
+async def execute(make_request, _create_head_pose, tts_queue, params):
     """Execute the reset_antennas tool."""
     speech = params.get('speech')
     
