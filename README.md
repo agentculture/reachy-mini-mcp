@@ -1,9 +1,9 @@
 # Reachy Mini MCP Server
 
-[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=agentculture_reachy_mini_mcp&metric=coverage)](https://sonarcloud.io/summary/new_code?id=agentculture_reachy_mini_mcp)
-[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=agentculture_reachy_mini_mcp&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=agentculture_reachy_mini_mcp)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=agentculture_reachy-mini-mcp&metric=coverage)](https://sonarcloud.io/summary/new_code?id=agentculture_reachy-mini-mcp)
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=agentculture_reachy-mini-mcp&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=agentculture_reachy-mini-mcp)
 
-<!-- Badges activate once the SonarCloud project `agentculture_reachy_mini_mcp` and
+<!-- Badges activate once the SonarCloud project `agentculture_reachy-mini-mcp` and
 the `SONAR_TOKEN` repo secret are provisioned; see CLAUDE.md. -->
 
 A Model Context Protocol (MCP) server for controlling the [Reachy Mini](https://github.com/pollen-robotics/reachy_mini) robot using [FastMCP](https://github.com/jlowin/fastmcp).

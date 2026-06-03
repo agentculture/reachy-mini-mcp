@@ -176,7 +176,7 @@ suite, and a PyPI/TestPyPI publish workflow, so **`version-bump`, `run-tests`, a
 `pypi-maintainer` are now live** (the dist name is `reachy-mini-mcp`; CI publishes
 via OIDC Trusted Publishing in `.github/workflows/publish.yml`). As of `0.2.0`, the
 `publish.yml` `test` job also generates `coverage.xml` and runs a **SonarCloud**
-scan (`sonar-project.properties`, projectKey `agentculture_reachy_mini_mcp`; CLI
+scan (`sonar-project.properties`, projectKey `agentculture_reachy-mini-mcp`; CLI
 coverage is gated at `fail_under = 95`). The scan step is guarded by
 `if: env.SONAR_TOKEN != ''`, so it stays inert — and `sonarclaude` / the SonarCloud
 parts of `cicd` return no data — until the external SonarCloud project and the
